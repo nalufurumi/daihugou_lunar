@@ -1,26 +1,16 @@
-# 大富豪ゲームサイト（仮）
+# React + Vite
 
-Lunarチームの遊びプロジェクト。みんなで共同開発する大富豪（Daifugo）オンラインゲーム。
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-## 技術スタック
-- フロントエンド: React + Vite
-- 通信: （検討中）まずはローカル対戦から実装し、将来的にリアルタイムオンライン対戦へ拡張予定
+Currently, two official plugins are available:
 
-## 開発ルール
-ブランチ運用・PRの流れは [CONTRIBUTING.md](./CONTRIBUTING.md) を参照してください。
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 
-## セットアップ
-```bash
-git clone <このリポジトリのURL>
-cd <repo名>
-npm install
-npm run dev
-```
+## React Compiler
 
-## 担当分け（暫定）
-| 担当領域 | ブランチ | 担当者 |
-|---|---|---|
-| ゲームロジック | `feature/game-logic` | |
-| ゲームUI | `feature/game-ui` | |
-| ロビー画面 | `feature/lobby` | |
-| トップページ・ルール説明 | `feature/homepage` | |
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+
+## Expanding the ESLint configuration
+
+If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
