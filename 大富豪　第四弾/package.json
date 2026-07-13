@@ -1,0 +1,11 @@
+{
+  "name": "daifugo",
+  "version": "0.1.0",
+  "description": "大富豪ゲームのロジック実装",
+  "type": "module",
+  "main": "game.js",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "license": "MIT"
+}
