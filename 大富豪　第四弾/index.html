@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>大富豪</title>
+<style>
+  :root {
+    --bg: #1b1f27;
+    --surface: #252b36;
+    --surface-2: #2e3542;
+    --text: #eef1f6;
+    --text-muted: #9aa3b2;
+    --accent: #6ea8fe;
+    --danger: #ff8080;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 1.5rem;
+  }
+  h1 { font-size: 1.25rem; margin: 0 0 1rem; }
+  .setup { display: flex; align-items: center; gap: 8px; margin-bottom: 1rem; }
+  select, button {
+    font-size: 14px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--surface-2);
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  #status { font-size: 14px; color: var(--text-muted); margin-bottom: 0.25rem; }
+  #lockStatus { font-size: 12px; color: var(--text-muted); margin-bottom: 0.75rem; line-height: 1.6; }
+  .field {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    min-height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .pending {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    display: none;
+  }
+  .hand-block { margin-bottom: 0.75rem; }
+  .hand-block p { font-size: 13px; color: var(--text-muted); margin: 0 0 6px; }
+  .hand { display: flex; flex-wrap: wrap; gap: 6px; }
+  .controls { display: flex; align-items: center; gap: 8px; margin-top: 0.5rem; }
+  .hint { font-size: 12px; color: var(--text-muted); }
+  .label-muted { font-size: 13px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+  <h1>大富豪</h1>
+
+  <div class="setup">
+    <span class="label-muted">プレイヤー人数:</span>
+    <select id="playerCount">
+      <option value="2">2人</option>
+      <option value="3">3人</option>
+      <option value="4">4人</option>
+      <option value="5">5人</option>
+    </select>
+    <button id="startBtn">この人数で開始</button>
+  </div>
+
+  <div id="status"></div>
+  <div id="lockStatus"></div>
+
+  <div class="field">
+    <span class="label-muted">場:</span>
+    <div id="field" class="hand"></div>
+  </div>
+
+  <div id="pendingArea" class="pending"></div>
+
+  <div id="handsArea"></div>
+
+  <div class="controls">
+    <button id="playBtn">選んだカードを出す</button>
+    <button id="passBtn">パス</button>
+    <span id="hint" class="hint"></span>
+  </div>
+
+  <script type="module">
+    import {
+      createDeck, shuffleDeck, dealCards, sortHand,
+      getPlayType, getPlayStrength, getPlaySuits,
+      canPlayGroup, isSpade3CounterJoker, isSandstormPlay,
+    } from './card.js';
+    import { createGameState, playGroup, passTurn } from './game.js';
+
+    const SUIT_SYMBOL = { spade: '♠', heart: '♥', diamond: '♦', club: '♣', joker: 'JOKER' };
+    const RANK_LABEL = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+    const TYPE_LABEL = { group: 'ペア系', straight: '階段' };
+
+    function cardLabel(c) {
+      if (c.suit === 'joker') return 'JOKER';
+      return (RANK_LABEL[c.rank] || c.rank) + SUIT_SYMBOL[c.suit];
+    }
+
+    let state;
+    let uiSelected = [];
+    let pending = null; // { cards, needs }
+
+    function isEffectivelyReversed() {
+      return state.revolution !== (state.elevenEffect === 'back');
+    }
+
+    function newGame(playerCount) {
+      const deck = shuffleDeck(createDeck());
+      const hands = dealCards(deck, playerCount).map((h) => sortHand(h));
+      state = createGameState(hands);
+      uiSelected = [];
+      pending = null;
+      buildHandAreas(playerCount);
+      document.getElementById('pendingArea').style.display = 'none';
+      render();
+    }
+
+    function buildHandAreas(playerCount) {
+      const area = document.getElementById('handsArea');
+      area.innerHTML = '';
+      for (let i = 0; i < playerCount; i++) {
+        const wrap = document.createElement('div');
+        wrap.className = 'hand-block';
+        const label = document.createElement('p');
+        label.textContent = 'プレイヤー' + (i + 1) + 'の手札';
+        const handDiv = document.createElement('div');
+        handDiv.id = 'p' + i + 'hand';
+        handDiv.className = 'hand';
+        wrap.appendChild(label);
+        wrap.appendChild(handDiv);
+        area.appendChild(wrap);
+      }
+    }
+
+    function cardKey(c) { return c.suit + '-' + c.rank + '-' + c._uid; }
+
+    function toggleSelect(pIdx, card) {
+      if (pending) return;
+      if (state.turn !== pIdx || state.finished.length >= state.hands.length - 1) return;
+      const key = cardKey(card);
+      const i = uiSelected.indexOf(key);
+      if (i >= 0) uiSelected.splice(i, 1);
+      else uiSelected.push(key);
+      render();
+    }
+
+    function startPlay() {
+      const pIdx = state.turn;
+      const hand = state.hands[pIdx];
+      const chosen = hand.filter((c) => uiSelected.includes(cardKey(c)));
+      if (chosen.length === 0) return;
+
+      const rev = isEffectivelyReversed();
+      const isUniv = isSpade3CounterJoker(chosen, state.field) || isSandstormPlay(chosen);
+      const allJackOrJoker = chosen.every((c) => c.suit === 'joker' || c.rank === 11);
+      const isStayJack = state.elevenEffect === 'stay' && getPlayType(chosen) === 'group' && allJackOrJoker;
+      const bypass = isUniv || isStayJack;
+
+      if (!bypass && !canPlayGroup(chosen, state.field, rev)) return;
+      if (state.elevenEffect === 'stay' && !bypass) return;
+      if (state.sequenceLock && !bypass) {
+        const fs = getPlayStrength(state.field, rev), ps = getPlayStrength(chosen, rev);
+        if (chosen.length !== state.field.length || ps !== fs + 1) return;
+      }
+      const playSuits = getPlaySuits(chosen);
+      if (state.suitLock && !playSuits.has(state.suitLock) && !bypass) return;
+
+      const playType = getPlayType(chosen);
+      const rep = chosen.find((c) => c.suit !== 'joker');
+      const rank = rep ? rep.rank : null;
+
+      let needs = null;
+      if (!bypass && playType === 'group') {
+        if (rank === 7) needs = 'give';
+        else if (rank === 10) needs = 'discard';
+        else if (rank === 12) needs = 'declare';
+        else if (rank === 11) needs = 'eleven';
+      }
+
+      if (needs) {
+        pending = { cards: chosen, needs };
+        uiSelected = [];
+        renderPending();
+      } else {
+        finalize(chosen, {});
+      }
+    }
+
+    function finalize(cards, options) {
+      try {
+        playGroup(state, state.turn, cards, options);
+      } catch (e) {
+        document.getElementById('hint').textContent = e.message;
+        return;
+      }
+      pending = null;
+      uiSelected = [];
+      render();
+    }
+
+    function doPass() {
+      passTurn(state);
+      uiSelected = [];
+      render();
+    }
+
+    function renderPending() {
+      const area = document.getElementById('pendingArea');
+      area.style.display = 'block';
+      area.innerHTML = '';
+      const pIdx = state.turn;
+      const hand = state.hands[pIdx];
+      const playedCards = pending.cards;
+      const remainingHand = hand.filter((c) => !playedCards.some((p) => p.suit === c.suit && p.rank === c.rank));
+      const maxN = playedCards.length;
+
+      const title = document.createElement('p');
+      title.className = 'label-muted';
+      title.style.margin = '0 0 8px';
+
+      if (pending.needs === 'give') {
+        title.textContent = '7の効果: 次のプレイヤーに渡すカードを0〜' + maxN + '枚選んでください';
+        area.appendChild(title);
+        appendCardPicker(area, remainingHand, maxN, (picked) => finalize(pending.cards, { giveCards: picked }));
+      } else if (pending.needs === 'discard') {
+        title.textContent = '10の効果: 捨てるカードを0〜' + maxN + '枚選んでください';
+        area.appendChild(title);
+        appendCardPicker(area, remainingHand, maxN, (picked) => finalize(pending.cards, { discardCards: picked }));
+      } else if (pending.needs === 'declare') {
+        title.textContent = '12の効果: 全員に捨てさせる数字を' + maxN + '個選んでください';
+        area.appendChild(title);
+        appendRankPicker(area, maxN, (ranks) => finalize(pending.cards, { declareRanks: ranks }));
+      } else if (pending.needs === 'eleven') {
+        title.textContent = '11の効果を選んでください';
+        area.appendChild(title);
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.gap = '8px';
+        [['through', 'そのまま'], ['back', 'バック'], ['stay', 'ステイ']].forEach(([choice, label]) => {
+          const b = document.createElement('button');
+          b.textContent = label;
+          b.onclick = () => finalize(pending.cards, { elevenChoice: choice });
+          row.appendChild(b);
+        });
+        area.appendChild(row);
+      }
+    }
+
+    function appendCardPicker(area, hand, n, onConfirm) {
+      const list = document.createElement('div');
+      list.className = 'hand';
+      list.style.marginBottom = '8px';
+      const picked = [];
+      const countLabel = document.createElement('span');
+      countLabel.className = 'hint';
+      countLabel.style.marginRight = '8px';
+
+      function updateCount() { countLabel.textContent = picked.length + ' / ' + n + ' 枚選択中'; }
+
+      hand.forEach((c) => {
+        if (c._uid === undefined) c._uid = Math.random().toString(36).slice(2, 7);
+        const btn = document.createElement('button');
+        btn.textContent = cardLabel(c);
+        btn.onclick = () => {
+          const idx = picked.findIndex((p) => p._uid === c._uid);
+          if (idx >= 0) { picked.splice(idx, 1); btn.classList.remove('selected'); }
+          else if (picked.length < n) { picked.push(c); btn.classList.add('selected'); }
+          updateCount();
+        };
+        list.appendChild(btn);
+      });
+      area.appendChild(list);
+      updateCount();
+      area.appendChild(countLabel);
+
+      const confirmBtn = document.createElement('button');
+      confirmBtn.textContent = '決定';
+      confirmBtn.style.marginLeft = '8px';
+      confirmBtn.onclick = () => onConfirm(picked);
+      area.appendChild(confirmBtn);
+    }
+
+    function appendRankPicker(area, n, onConfirm) {
+      const list = document.createElement('div');
+      list.className = 'hand';
+      list.style.marginBottom = '8px';
+      const picked = [];
+      for (let r = 1; r <= 13; r++) {
+        const btn = document.createElement('button');
+        btn.textContent = RANK_LABEL[r] || String(r);
+        btn.onclick = () => {
+          const idx = picked.indexOf(r);
+          if (idx >= 0) { picked.splice(idx, 1); btn.classList.remove('selected'); }
+          else if (picked.length < n) { picked.push(r); btn.classList.add('selected'); }
+          confirmBtn.disabled = picked.length !== n;
+        };
+        list.appendChild(btn);
+      }
+      area.appendChild(list);
+      const confirmBtn = document.createElement('button');
+      confirmBtn.textContent = '決定';
+      confirmBtn.disabled = true;
+      confirmBtn.onclick = () => onConfirm(picked);
+      area.appendChild(confirmBtn);
+    }
+
+    function render() {
+      document.getElementById('pendingArea').style.display = pending ? 'block' : 'none';
+      const statusEl = document.getElementById('status');
+      const lockEl = document.getElementById('lockStatus');
+      const fieldEl = document.getElementById('field');
+      const hint = document.getElementById('hint');
+      const n = state.hands.length;
+
+      fieldEl.innerHTML = '';
+      if (state.field) {
+        state.field.forEach((c) => {
+          const b = document.createElement('button');
+          b.textContent = cardLabel(c);
+          b.disabled = true;
+          fieldEl.appendChild(b);
+        });
+        const tag = document.createElement('span');
+        tag.className = 'hint';
+        tag.textContent = '(' + TYPE_LABEL[getPlayType(state.field)] + ')';
+        fieldEl.appendChild(tag);
+      } else {
+        const span = document.createElement('span');
+        span.className = 'label-muted';
+        span.textContent = '(なし)';
+        fieldEl.appendChild(span);
+      }
+
+      if (state.finished.length >= n - 1) {
+        const order = state.finished.map((p, i) => (i + 1) + '位:プレイヤー' + (p + 1)).join(' / ');
+        statusEl.textContent = 'ゲーム終了！ ' + order;
+      } else {
+        statusEl.textContent = '手番: プレイヤー' + (state.turn + 1) + '（残り' + (n - state.finished.length) + '人）';
+      }
+
+      const parts = [];
+      parts.push('革命: ' + (state.revolution ? '発動中' : '未発動'));
+      parts.push('11効果: ' + (state.elevenEffect ? (state.elevenEffect === 'back' ? 'バック' : 'ステイ') : 'なし'));
+      parts.push('階段縛り: ' + (state.sequenceLock ? '発動中' : '未発動'));
+      parts.push('記号縛り: ' + (state.suitLock ? ('発動中(' + SUIT_SYMBOL[state.suitLock] + ')') : '未発動'));
+      parts.push('砂嵐ロック: ' + (state.sandstormLock ? '発動中' : '未発動'));
+      parts.push('進行方向: ' + (state.direction === 1 ? '通常' : '逆回り'));
+      lockEl.textContent = parts.join(' / ');
+
+      for (let pIdx = 0; pIdx < n; pIdx++) {
+        const el = document.getElementById('p' + pIdx + 'hand');
+        if (!el) continue;
+        el.innerHTML = '';
+        const hand = state.hands[pIdx];
+        if (state.finished.includes(pIdx)) {
+          const done = document.createElement('span');
+          done.className = 'label-muted';
+          done.textContent = '上がり済み';
+          el.appendChild(done);
+          continue;
+        }
+        hand.forEach((c) => {
+          if (c._uid === undefined) c._uid = Math.random().toString(36).slice(2, 7);
+          const isTurn = state.turn === pIdx && state.finished.length < n - 1 && !pending;
+          const selected = uiSelected.includes(cardKey(c));
+          const btn = document.createElement('button');
+          btn.textContent = cardLabel(c);
+          if (selected) btn.classList.add('selected');
+          btn.disabled = !isTurn;
+          btn.onclick = () => toggleSelect(pIdx, c);
+          el.appendChild(btn);
+        });
+      }
+
+      const curHand = state.hands[state.turn] || [];
+      const chosen = curHand.filter((c) => uiSelected.includes(cardKey(c)));
+      const rev = isEffectivelyReversed();
+      const isUniv = isSpade3CounterJoker(chosen, state.field) || isSandstormPlay(chosen);
+      const allJackOrJoker = chosen.length > 0 && chosen.every((c) => c.suit === 'joker' || c.rank === 11);
+      const isStayJack = state.elevenEffect === 'stay' && getPlayType(chosen) === 'group' && allJackOrJoker;
+      const bypass = isUniv || isStayJack;
+
+      let playable = chosen.length > 0;
+      if (playable) {
+        if (!bypass) playable = canPlayGroup(chosen, state.field, rev);
+        if (playable && state.elevenEffect === 'stay' && !bypass) playable = false;
+        if (playable && state.sequenceLock && !bypass) {
+          const fs = getPlayStrength(state.field, rev), ps = getPlayStrength(chosen, rev);
+          playable = chosen.length === state.field.length && ps === fs + 1;
+        }
+        if (playable && state.suitLock && !bypass) {
+          playable = getPlaySuits(chosen).has(state.suitLock);
+        }
+      }
+      const over = state.finished.length >= n - 1;
+      document.getElementById('playBtn').disabled = !playable || over || !!pending;
+      document.getElementById('passBtn').disabled = over || !!pending;
+      if (!hint.dataset.errorShown) {
+        hint.textContent = uiSelected.length > 0 && !playable ? 'その組み合わせはまだ出せません' : '';
+      }
+      hint.dataset.errorShown = '';
+    }
+
+    document.getElementById('playBtn').addEventListener('click', startPlay);
+    document.getElementById('passBtn').addEventListener('click', doPass);
+    document.getElementById('startBtn').addEventListener('click', () => {
+      const n = parseInt(document.getElementById('playerCount').value, 10);
+      newGame(n);
+    });
+
+    newGame(2);
+  </script>
+</body>
+</html>
