@@ -121,6 +121,16 @@
   .cta{background:linear-gradient(180deg,var(--gold-hi),var(--gold-lo)); color:var(--gold-ink); font-weight:800; font-size:17px; padding:16px 40px; border-radius:16px; border:none; cursor:pointer; box-shadow:0 16px 34px -12px rgba(220,178,79,.7);}
   .ghost-cta{background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12); color:var(--text); font-weight:700; font-size:14px; padding:13px 26px; border-radius:14px; cursor:pointer;}
 
+  /* 7/10: 手札からカードを選ばせるグリッド */
+  .pick-grid{display:flex; flex-wrap:wrap; gap:8px; justify-content:center; max-width:340px;}
+  .pick-grid .card{position:static; width:52px; height:74px; font-size:13px; cursor:pointer;}
+  .pick-grid .card.selected{box-shadow:0 10px 20px -6px rgba(220,178,79,.6); outline:2px solid var(--gold); transform:translateY(-6px);}
+
+  /* 12: 数字を選ばせるグリッド */
+  .rank-grid{display:flex; flex-wrap:wrap; gap:8px; justify-content:center; max-width:300px;}
+  .rank-btn{width:40px; height:40px; border-radius:10px; border:1px solid var(--gold-line); background:rgba(255,255,255,.05); color:var(--text); font-family:var(--font-ui); font-weight:800; font-size:14px; cursor:pointer;}
+  .rank-btn.on{background:linear-gradient(160deg,var(--gold-hi),var(--gold-lo)); color:var(--gold-ink); border-color:transparent;}
+
   /* 結果リスト */
   .result-list{width:100%; max-width:300px; display:flex; flex-direction:column; gap:8px;}
   .result-row{display:flex; align-items:center; gap:12px; background:rgba(255,255,255,.05); border-radius:13px; padding:11px 15px;}
@@ -184,6 +194,26 @@
     <button class="cta" id="startBtn">配って始める</button>
   </div>
 
+  <!-- 7/10の効果: 手札からカードを選ばせるオーバーレイ（渡す/捨てる 共通） -->
+  <div class="overlay hidden" id="pickCardsOverlay">
+    <div class="kicker" id="pickCardsTitle">カードを選んでください</div>
+    <div class="pick-grid" id="pickCardsGrid"></div>
+    <div style="display:flex;gap:12px;">
+      <button class="ghost-cta" id="pickCardsCancel">出すのをやめる</button>
+      <button class="cta" id="pickCardsConfirm" disabled>決定</button>
+    </div>
+  </div>
+
+  <!-- 12の効果: 全員に捨てさせる数字を選ばせるオーバーレイ -->
+  <div class="overlay hidden" id="pickRanksOverlay">
+    <div class="kicker" id="pickRanksTitle">数字を選んでください</div>
+    <div class="rank-grid" id="pickRanksGrid"></div>
+    <div style="display:flex;gap:12px;">
+      <button class="ghost-cta" id="pickRanksCancel">出すのをやめる</button>
+      <button class="cta" id="pickRanksConfirm" disabled>決定</button>
+    </div>
+  </div>
+
   <!-- 役選択オーバーレイ（組にも階段にも解釈できるカードを出した時だけ表示） -->
   <div class="overlay hidden" id="playAsOverlay">
     <div class="kicker">どちらの役で出す？</div>
@@ -217,7 +247,7 @@
 
 <script type="module">
   // 実エンジン（りゅうせい作）をそのまま利用。UI側は state を読んで描くだけ。
-  import { createDeck, shuffleDeck, dealCards, sortHand, getPossiblePlayTypes } from './card.js';
+  import { createDeck, shuffleDeck, dealCards, sortHand, getPossiblePlayTypes, getPlayType, getStraightRanks } from './card.js';
   import { createGameState, playGroup, passTurn, isGameOver } from './game.js';
 
   // ---- カード表示のためのヘルパ ----
@@ -371,7 +401,10 @@
   }
 
   // ---- 手を出す ----
-  $('playBtn').addEventListener('click', () => {
+  // 7(渡す)/10(捨てる)/12(宣言)は、出した役・カードの内容によって発動するかどうかが決まるため、
+  // 手札から直接わかる範囲でここでも簡易的に同じ判定をして、必要な入力だけ先に集めてから
+  // playGroupに渡す。最終的な正しさの判定はgame.js側（validateCardSelection等）に任せる
+  $('playBtn').addEventListener('click', async () => {
     if (!selected.length) return;
     const turnBefore = state.turn;
     // 選択を手札の並び順にそろえてから渡す
@@ -380,13 +413,56 @@
     // 組としても階段としても成立するカード（実カード1枚+ジョーカー2枚 等）は、
     // どちらの役で出すかをプレイヤーに選ばせる。1通りしかなければ今まで通り自動判定に任せる
     const possibleTypes = getPossiblePlayTypes(cards);
+    let playAs = null;
     if (possibleTypes.length > 1) {
-      askPlayAs(possibleTypes, (playAs) => {
-        if (playAs) tryPlay(turnBefore, cards, { playAs });
-      });
-      return;
+      playAs = await askPlayAs(possibleTypes);
+      if (!playAs) return; // 「やめる」を選んだので出さない
     }
-    tryPlay(turnBefore, cards, {});
+    const playType = playAs || getPlayType(cards);
+    const options = playAs ? { playAs } : {};
+
+    // 出した後に残る手札（7で渡す/10で捨てるカードの選択肢はここから選ぶ）
+    let pool = state.hands[turnBefore].filter(c => !cards.includes(c));
+    const repRank = (cards.find(c => c.suit !== 'joker') || {}).rank ?? null;
+    // 階段はジョーカーで埋めている数字も含めて判定する（game.js側と同じ考え方）
+    const containsRank = (rank) =>
+      cards.some(c => c.rank === rank) ||
+      (playType === 'straight' && getStraightRanks(cards).includes(rank));
+    // ペア系は出した枚数ぶん、階段はその数字を含んでいれば1
+    const magnitude = (rank) => (playType === 'group' ? cards.length : (containsRank(rank) ? 1 : 0));
+    const willTrigger = (rank) => (playType === 'group' ? repRank === rank : containsRank(rank));
+
+    if (playType === 'group' || playType === 'straight') {
+      if (willTrigger(7)) {
+        // 渡せるカードが足りない（手札が少ない終盤等）場合は無理に選ばせず効果なしにする
+        const need = Math.min(magnitude(7), pool.length);
+        if (need > 0) {
+          const chosen = await pickCards(pool, need, `7: 次の人に渡すカードを${need}枚選んでください`);
+          if (!chosen) { return; } // 「出すのをやめる」
+          options.giveCards = chosen;
+          pool = pool.filter(c => !chosen.includes(c));
+        }
+      }
+      if (willTrigger(10)) {
+        const need = Math.min(magnitude(10), pool.length);
+        if (need > 0) {
+          const chosen = await pickCards(pool, need, `10: 捨てるカードを${need}枚選んでください`);
+          if (!chosen) { return; }
+          options.discardCards = chosen;
+          pool = pool.filter(c => !chosen.includes(c));
+        }
+      }
+      if (willTrigger(12)) {
+        const need = magnitude(12);
+        if (need > 0) {
+          const ranks = await pickRanks(need, `12: 全員に捨てさせる数字を${need}個選んでください`);
+          if (!ranks) { return; }
+          options.declareRanks = ranks;
+        }
+      }
+    }
+
+    tryPlay(turnBefore, cards, options);
   });
 
   function tryPlay(turnBefore, cards, options){
@@ -400,19 +476,93 @@
     afterAction(turnBefore);
   }
 
-  // 組/階段どちらで出すかをプレイヤーに選ばせるオーバーレイ
-  function askPlayAs(possibleTypes, onChoose){
-    $('playAsOverlay').classList.remove('hidden');
-    const cleanup = () => {
-      $('playAsOverlay').classList.add('hidden');
-      $('playAsGroupBtn').onclick = null;
-      $('playAsStraightBtn').onclick = null;
-      $('playAsCancelBtn').onclick = null;
-    };
-    $('playAsGroupBtn').onclick = () => { cleanup(); onChoose('group'); };
-    $('playAsStraightBtn').onclick = () => { cleanup(); onChoose('straight'); };
-    $('playAsCancelBtn').onclick = () => { cleanup(); onChoose(null); };
+  // 組/階段どちらで出すかをプレイヤーに選ばせるオーバーレイ（選ばれた側 or null(キャンセル) をPromiseで返す）
+  function askPlayAs(possibleTypes){
+    return new Promise((resolve) => {
+      $('playAsOverlay').classList.remove('hidden');
+      const cleanup = () => {
+        $('playAsOverlay').classList.add('hidden');
+        $('playAsGroupBtn').onclick = null;
+        $('playAsStraightBtn').onclick = null;
+        $('playAsCancelBtn').onclick = null;
+      };
+      $('playAsGroupBtn').onclick = () => { cleanup(); resolve('group'); };
+      $('playAsStraightBtn').onclick = () => { cleanup(); resolve('straight'); };
+      $('playAsCancelBtn').onclick = () => { cleanup(); resolve(null); };
+    });
   }
+
+  // 7/10の効果: poolからn枚選ばせる（選んだカードの配列 or null(キャンセル) をPromiseで返す）
+  function pickCards(pool, n, title){
+    return new Promise((resolve) => {
+      $('pickCardsTitle').textContent = title;
+      const grid = $('pickCardsGrid'); grid.innerHTML = '';
+      const confirmBtn = $('pickCardsConfirm');
+      const chosen = [];
+      const updateConfirm = () => {
+        confirmBtn.disabled = chosen.length !== n;
+        confirmBtn.textContent = `決定（${chosen.length}/${n}）`;
+      };
+      pool.forEach(card => {
+        const c = cardEl(card);
+        c.classList.add('pick-card');
+        c.addEventListener('click', () => {
+          const idx = chosen.indexOf(card);
+          if (idx >= 0) { chosen.splice(idx, 1); c.classList.remove('selected'); }
+          else if (chosen.length < n) { chosen.push(card); c.classList.add('selected'); }
+          updateConfirm();
+        });
+        grid.appendChild(c);
+      });
+      updateConfirm();
+      $('pickCardsOverlay').classList.remove('hidden');
+      const cleanup = () => {
+        $('pickCardsOverlay').classList.add('hidden');
+        confirmBtn.onclick = null;
+        $('pickCardsCancel').onclick = null;
+      };
+      confirmBtn.onclick = () => { cleanup(); resolve([...chosen]); };
+      $('pickCardsCancel').onclick = () => { cleanup(); resolve(null); };
+    });
+  }
+
+  // 12の効果: 1〜13からn個の数字を選ばせる（選んだ数字の配列 or null(キャンセル) をPromiseで返す）
+  const RANK_ALL = [1,2,3,4,5,6,7,8,9,10,11,12,13]; // A,2〜10,J,Q,K の順
+  function pickRanks(n, title){
+    return new Promise((resolve) => {
+      $('pickRanksTitle').textContent = title;
+      const grid = $('pickRanksGrid'); grid.innerHTML = '';
+      const confirmBtn = $('pickRanksConfirm');
+      const chosen = [];
+      const updateConfirm = () => {
+        confirmBtn.disabled = chosen.length !== n;
+        confirmBtn.textContent = `決定（${chosen.length}/${n}）`;
+      };
+      RANK_ALL.forEach(rank => {
+        const b = document.createElement('button');
+        b.className = 'rank-btn';
+        b.type = 'button';
+        b.textContent = rankLabel(rank);
+        b.addEventListener('click', () => {
+          const idx = chosen.indexOf(rank);
+          if (idx >= 0) { chosen.splice(idx, 1); b.classList.remove('on'); }
+          else if (chosen.length < n) { chosen.push(rank); b.classList.add('on'); }
+          updateConfirm();
+        });
+        grid.appendChild(b);
+      });
+      updateConfirm();
+      $('pickRanksOverlay').classList.remove('hidden');
+      const cleanup = () => {
+        $('pickRanksOverlay').classList.add('hidden');
+        confirmBtn.onclick = null;
+        $('pickRanksCancel').onclick = null;
+      };
+      confirmBtn.onclick = () => { cleanup(); resolve([...chosen]); };
+      $('pickRanksCancel').onclick = () => { cleanup(); resolve(null); };
+    });
+  }
+
 
   // ---- パス ----
   $('passBtn').addEventListener('click', () => {
@@ -431,7 +581,7 @@
   }
 
   // ---- オーバーレイ制御 ----
-  function hideAll(){ ['startOverlay','handoffOverlay','resultOverlay','playAsOverlay'].forEach(id => $(id).classList.add('hidden')); }
+  function hideAll(){ ['startOverlay','handoffOverlay','resultOverlay','playAsOverlay','pickCardsOverlay','pickRanksOverlay'].forEach(id => $(id).classList.add('hidden')); }
   function showHandoff(){
     $('handoffName').textContent = names(state.turn);
     $('handoffOverlay').classList.remove('hidden');

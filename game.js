@@ -1,3 +1,5 @@
+// ✅ これが本番で実際に使われているファイルです（index.htmlがこの直下のファイルをimportしてます）。
+// 新しいロジックは「大富豪　第◯弾」のような別フォルダではなく、必ずここに直接書いてください。
 import {
   canPlayGroup,
   getPlayStrength,
