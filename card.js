@@ -46,7 +46,7 @@ export function shuffleDeck(deck) {
   return shuffled;
 }
 
-// 2人のプレイヤーに山札を均等に配る
+// 指定人数のプレイヤーに山札を均等に配る (2人以上の任意人数に対応)
 export function dealCards(deck, playerCount = 2) {
   const hands = Array.from({ length: playerCount }, () => []);
 
@@ -114,18 +114,51 @@ export function isValidStraight(cards) {
 }
 
 // 出そうとしているカード群の種類を判定する ('group' | 'straight' | 'invalid')
+// 階段としても組としても解釈できる場合 (実カード1枚+ジョーカー2枚など) は階段を優先する。
+// どちらか一方をプレイヤーに選ばせたい場合は getPossiblePlayTypes を使う
 export function getPlayType(cards) {
   if (isValidStraight(cards)) return 'straight';
   if (isValidGroup(cards)) return 'group';
   return 'invalid';
 }
 
+// 出そうとしているカード群が成立し得る役を全て返す (該当なしなら空配列)
+// 実カード1枚+ジョーカー2枚のような組は、階段としても組としても解釈できるため両方返り得る
+export function getPossiblePlayTypes(cards) {
+  const types = [];
+  if (isValidStraight(cards)) types.push('straight');
+  if (isValidGroup(cards)) types.push('group');
+  return types;
+}
+
+// 階段として出したカード群が実際にカバーしている数字の一覧を返す (ジョーカーで埋めた数字も含む)
+// 例: 3,4,ジョーカー,6 の階段なら [3,4,5,6] を返す (ジョーカーが5を埋めている)
+// 実カードの最小値を起点に、出した枚数ぶんだけ連番を並べる (末尾の余りジョーカーで上に延長する
+// getStraightStrengthの規則と揃えてある)。階段として不成立なカード群を渡した場合は空配列を返す
+export function getStraightRanks(cards) {
+  if (!isValidStraight(cards)) return [];
+
+  const reals = cards.filter((c) => c.suit !== 'joker');
+  const minS = Math.min(...reals.map((c) => getStrength(c)));
+
+  const ranks = [];
+  for (let i = 0; i < cards.length; i++) {
+    const idx = minS + i;
+    if (idx < 0 || idx >= RANK_ORDER.length) break; // 序列の範囲外は無視 (通常は起こらない)
+    ranks.push(RANK_ORDER[idx]);
+  }
+  return ranks;
+}
+
 // グループの強さを取得する (ジョーカー以外の代表rankで判定)
-export function getGroupStrength(cards, revolution = false) {
+// declaredRank: 実カードが1枚も無い(全部ジョーカー)組で、プレイヤーが「このジョーカー達を
+// 何のrankとして出すか」を明示した場合に使う。省略時、実カードが無ければ最強(Infinity)扱いのまま
+export function getGroupStrength(cards, revolution = false, declaredRank = null) {
   const representative = cards.find((c) => c.suit !== 'joker');
-  // 全部ジョーカーなら最強扱い
-  if (!representative) return Infinity;
-  return getStrength(representative, revolution);
+  if (representative) return getStrength(representative, revolution);
+  if (declaredRank != null) return getStrength({ suit: null, rank: declaredRank }, revolution);
+  // 全部ジョーカーで宣言も無いなら、従来通り最強扱い
+  return Infinity;
 }
 
 // 階段の強さを取得する (一番強い実カードを基準に、末尾側の余りジョーカー分も加味)
@@ -144,10 +177,13 @@ export function getStraightStrength(cards, revolution = false) {
 }
 
 // 出そうとしているカード群の強さを、種類に応じて取得する
-export function getPlayStrength(cards, revolution = false) {
-  return getPlayType(cards) === 'straight'
+// playTypeを明示的に渡すと、階段/組どちらとして扱うかを自動判定に任せず固定できる
+// (実カード1枚+ジョーカー2枚のような、両方に解釈できる組をプレイヤーが選択した場合など)
+// declaredRankは、全部ジョーカーの組('group')が代表する数字を明示したい場合に使う
+export function getPlayStrength(cards, revolution = false, playType = getPlayType(cards), declaredRank = null) {
+  return playType === 'straight'
     ? getStraightStrength(cards, revolution)
-    : getGroupStrength(cards, revolution);
+    : getGroupStrength(cards, revolution, declaredRank);
 }
 
 // 出そうとしているカード群で使われているスートの集合を取得する (ジョーカーは除く)
@@ -189,8 +225,18 @@ export function isSandstormPlay(cards) {
 // fieldGroup: 場にある最後のグループ (カードの配列)。nullなら誰でも出せる
 // playGroup: 出そうとしているカードの配列
 // revolution: 革命発動中かどうか (強さの序列に影響)
-export function canPlayGroup(playGroup, fieldGroup, revolution = false) {
-  const playType = getPlayType(playGroup);
+// playType/fieldType: 明示的に渡すと、その役 (group/straight) として扱う。
+// 省略時は自動判定 (getPlayType) を使う従来通りの挙動
+// declaredRank/fieldDeclaredRank: 全部ジョーカーの組が代表する数字 (playGroup側/fieldGroup側それぞれ)
+export function canPlayGroup(
+  playGroup,
+  fieldGroup,
+  revolution = false,
+  playType = getPlayType(playGroup),
+  fieldType = fieldGroup ? getPlayType(fieldGroup) : null,
+  declaredRank = null,
+  fieldDeclaredRank = null
+) {
   if (playType === 'invalid') return false;
 
   // 場が空なら何でも出せる
@@ -203,11 +249,13 @@ export function canPlayGroup(playGroup, fieldGroup, revolution = false) {
   if (isSandstormPlay(playGroup)) return true;
 
   // 場と種類 (ペア系 or 階段) が違うものは出せない
-  const fieldType = getPlayType(fieldGroup);
   if (playType !== fieldType) return false;
 
   // 枚数が場と同じでなければ出せない
   if (playGroup.length !== fieldGroup.length) return false;
 
-  return getPlayStrength(playGroup, revolution) > getPlayStrength(fieldGroup, revolution);
+  return (
+    getPlayStrength(playGroup, revolution, playType, declaredRank) >
+    getPlayStrength(fieldGroup, revolution, fieldType, fieldDeclaredRank)
+  );
 }

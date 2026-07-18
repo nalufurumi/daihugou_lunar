@@ -3,6 +3,8 @@ import {
   getPlayStrength,
   getPlaySuits,
   getPlayType,
+  getPossiblePlayTypes,
+  getStraightRanks,
   isSpade3CounterJoker,
   isSandstormPlay,
   sortHand,
@@ -13,6 +15,8 @@ export function createGameState(hands) {
   return {
     hands,               // 各プレイヤーの手札 [[...], [...]]
     field: null,          // 場に出ている最後のグループ (カードの配列 or null)
+    fieldType: null,      // 場の組が'group'/'straight'どちらとして出されたか (fieldがnullならnull)
+    fieldDeclaredRank: null, // 場が全部ジョーカーの組だった場合、それが代表していた数字 (通常はnull)
     turn: 0,              // 現在のターンのプレイヤーindex
     direction: 1,         // 手番が進む向き (1: 通常, -1: リバース中)
     passCount: 0,         // 連続パス数
@@ -31,9 +35,43 @@ function isEffectivelyReversed(state) {
   return state.revolution !== (state.elevenEffect === 'back');
 }
 
+// 7/10の選択カードが「出した枚数と一致しているか」「実際に(渡す/捨てる時点の)手札にあるか」を検証する。
+// pool には、これから出すカードを除いた後の手札 (handCopy) を渡す。
+// UI側のバリデーションだけに頼らず、game.js自身でも枚数と実在をチェックする
+function validateCardSelection(chosenCards, expectedCount, pool, label) {
+  if (!Array.isArray(chosenCards) || chosenCards.length !== expectedCount) {
+    throw new Error(`${label}は${expectedCount}枚選んでください`);
+  }
+  const remaining = [...pool];
+  for (const card of chosenCards) {
+    const idx = remaining.findIndex((c) => c.suit === card.suit && c.rank === card.rank);
+    if (idx === -1) {
+      throw new Error(`${label}に手札にないカードが含まれています`);
+    }
+    remaining.splice(idx, 1);
+  }
+}
+
+// 12で宣言する数字が「出した枚数と一致しているか」「重複していないか」「1〜13の範囲か」を検証する
+function validateDeclareRanks(ranks, expectedCount) {
+  if (!Array.isArray(ranks) || ranks.length !== expectedCount) {
+    throw new Error(`宣言する数字は${expectedCount}個選んでください`);
+  }
+  if (new Set(ranks).size !== ranks.length) {
+    throw new Error('同じ数字を重複して宣言することはできません');
+  }
+  if (ranks.some((r) => !Number.isInteger(r) || r < 1 || r > 13)) {
+    throw new Error('宣言する数字は1〜13の範囲で指定してください');
+  }
+}
+
 // カードの組 (1枚 or ペア以上 or 階段) を出す処理
 // cards: 出そうとしているカードの配列
 // options:
+//   playAs: 出そうとしているカード群が組('group')としても階段('straight')としても成立する場合に、
+//           どちらの役として出すかを明示する ('group' | 'straight')。未指定なら階段を優先して自動判定する
+//   declareRank: 出そうとしているカードが全部ジョーカーの場合に、それを何のrank(1〜13)として
+//                出すかを明示する。指定しない場合は従来通り最強固定(rank効果は発動しない)
 //   giveCards: 7を出した時、次のプレイヤーに渡すカードの配列
 //   discardCards: 10を出した時、自分の手札から捨てるカードの配列
 //   declareRanks: 12を出した時、全員に捨てさせる数字の配列
@@ -55,8 +93,38 @@ export function playGroup(state, playerIndex, cards, options = {}) {
 
   const effectiveRevolution = isEffectivelyReversed(state);
 
-  const playType = getPlayType(cards);
-  const representativeRank = (cards.find((c) => c.suit !== 'joker') || {}).rank ?? null;
+  // 出そうとしているカード群がどちらの役としても成立し得る場合 (実カード1枚+ジョーカー2枚 等)、
+  // options.playAsで明示的に選べるようにする。未指定なら従来通り階段を優先して自動判定する
+  const possibleTypes = getPossiblePlayTypes(cards);
+  let playType;
+  if (options.playAs) {
+    if (!possibleTypes.includes(options.playAs)) {
+      throw new Error('そのカードの組み合わせでは指定した役にできません');
+    }
+    playType = options.playAs;
+  } else {
+    playType = getPlayType(cards);
+  }
+  // 全部ジョーカーの組('group'型のみ。ジョーカーだけでは階段は成立しない)は、
+  // 通常は代表rankが無く最強固定になるが、options.declareRankで「何のrankとして出すか」を
+  // 明示できるようにする。これで階段縛りの厳密な数字一致や、5/7/9/10/11/12の効果にも使えるようになる
+  const allJokers = cards.every((c) => c.suit === 'joker');
+  let declaredRank = null;
+  if (allJokers && playType === 'group' && options.declareRank !== undefined && options.declareRank !== null) {
+    if (!Number.isInteger(options.declareRank) || options.declareRank < 1 || options.declareRank > 13) {
+      throw new Error('宣言する数字は1〜13の範囲で指定してください');
+    }
+    declaredRank = options.declareRank;
+  }
+
+  const representativeRank = (cards.find((c) => c.suit !== 'joker') || {}).rank ?? declaredRank ?? null;
+
+  // 階段の場合、ジョーカーが埋めている数字 (内側の穴埋め・末尾の延長どちらも) も
+  // 特殊効果の対象に含める。例: 3,4,ジョーカー,6 の階段なら、ジョーカーが埋めている
+  // 5の効果 (スキップ等) も発動する
+  const effectiveStraightRanks = playType === 'straight' ? getStraightRanks(cards) : [];
+  const containsRank = (rank) =>
+    cards.some((c) => c.rank === rank) || effectiveStraightRanks.includes(rank);
 
   // 砂嵐・ろくろ首の特例 (3を3枚同時出し) は場の状態を問わず出せる例外
   const isSandstorm = isSandstormPlay(cards);
@@ -86,7 +154,10 @@ export function playGroup(state, playerIndex, cards, options = {}) {
     throw new Error('ステイ中はJしか出せません');
   }
 
-  if (!bypassNormalCheck && !canPlayGroup(cards, state.field, effectiveRevolution)) {
+  if (
+    !bypassNormalCheck &&
+    !canPlayGroup(cards, state.field, effectiveRevolution, playType, state.fieldType, declaredRank, state.fieldDeclaredRank)
+  ) {
     throw new Error('そのカードの組は場に出せません');
   }
   if (bypassNormalCheck && playType === 'invalid') {
@@ -95,8 +166,8 @@ export function playGroup(state, playerIndex, cards, options = {}) {
 
   // 階段縛りが発動中は、場と同じ枚数で、代表の数字が「場の数字+1」でなければ出せない
   if (state.sequenceLock && !bypassNormalCheck) {
-    const fieldStrength = getPlayStrength(state.field, effectiveRevolution);
-    const playStrength = getPlayStrength(cards, effectiveRevolution);
+    const fieldStrength = getPlayStrength(state.field, effectiveRevolution, state.fieldType, state.fieldDeclaredRank);
+    const playStrength = getPlayStrength(cards, effectiveRevolution, playType, declaredRank);
     if (cards.length !== state.field.length || playStrength !== fieldStrength + 1) {
       throw new Error('階段縛りにより、連続する数字しか出せません');
     }
@@ -109,6 +180,30 @@ export function playGroup(state, playerIndex, cards, options = {}) {
     throw new Error('記号縛りにより、そのスートを含まないと出せません');
   }
 
+  // 7/10/12は出したカードの枚数に応じて要求される個数が決まる。
+  // 手札を実際に動かす前にここで検証しておく (途中で例外が飛んで手札が半端に変化するのを防ぐため)
+  // handCopyはこの時点で「出そうとしているカードを除いた後の手札」になっている
+  if (!bypassNormalCheck && (playType === 'group' || playType === 'straight')) {
+    const magnitudeEarly = (rank) => {
+      if (playType === 'group') return cards.length;
+      if (playType === 'straight') return containsRank(rank) ? 1 : 0;
+      return 0;
+    };
+    const willTrigger7 = playType === 'group' ? representativeRank === 7 : containsRank(7);
+    const willTrigger10 = playType === 'group' ? representativeRank === 10 : containsRank(10);
+    const willTrigger12 = playType === 'group' ? representativeRank === 12 : containsRank(12);
+
+    if (willTrigger7 && options.giveCards) {
+      validateCardSelection(options.giveCards, magnitudeEarly(7), handCopy, '渡すカード');
+    }
+    if (willTrigger10 && options.discardCards) {
+      validateCardSelection(options.discardCards, magnitudeEarly(10), handCopy, '捨てるカード');
+    }
+    if (willTrigger12 && options.declareRanks) {
+      validateDeclareRanks(options.declareRanks, magnitudeEarly(12));
+    }
+  }
+
   // 手札から取り除く
   for (const card of cards) {
     const idx = hand.findIndex(
@@ -117,17 +212,18 @@ export function playGroup(state, playerIndex, cards, options = {}) {
     hand.splice(idx, 1);
   }
 
-  // 革命判定: 同じ数字4枚同時出しでゲーム終了まで強さの序列が反転する (革命返しにも対応)
-  if (cards.length === 4 && playType === 'group') {
+  // 革命判定: 同じ数字4枚同時出し、または4枚以上の階段でゲーム終了まで強さの序列が反転する
+  // (革命返しにも対応: どちらの形でも、もう一度発動条件を満たせば元に戻る)
+  const isGroupRevolution = cards.length === 4 && playType === 'group';
+  const isStraightRevolution = playType === 'straight' && cards.length >= 4;
+  if (isGroupRevolution || isStraightRevolution) {
     state.revolution = !state.revolution;
   }
 
-  // 8切り判定: 8を含む組を出すと場が流れ、出した本人の手番が続く (ペア系・階段どちらも対象)
-  const isEightCut = cards.some((c) => c.rank === 8);
+  // 8切り判定: 8を含む組を出すと場が流れ、出した本人の手番が続く (ペア系・階段どちらも対象。
+  // 階段でジョーカーが8を埋めている場合も対象に含める)
+  const isEightCut = containsRank(8);
 
-  // 数字による特殊効果の判定ヘルパー
-  // ペア系は代表rankで判定、階段は「その数字を含んでいるか」で判定する
-  const containsRank = (rank) => cards.some((c) => c.rank === rank);
   // 効果の大きさ: ペア系は出した枚数、階段はその数字が1枚しかないので常に1
   const magnitude = (rank) => {
     if (playType === 'group') return cards.length;
@@ -180,6 +276,8 @@ export function playGroup(state, playerIndex, cards, options = {}) {
   if (isUniversalPlay || isEightCut) {
     // 場を流し、縛り・11の効果・砂嵐ロックもリセットする (革命状態はそのまま維持)
     state.field = null;
+    state.fieldType = null;
+    state.fieldDeclaredRank = null;
     state.passCount = 0;
     state.sequenceLock = false;
     state.lastPlaySuits = null;
@@ -195,6 +293,8 @@ export function playGroup(state, playerIndex, cards, options = {}) {
     // 砂嵐・ろくろ首: 場にそのまま残り、次のプレイヤー以降は砂嵐・ろくろ首でしか返せなくなる
     // (それ以外の縛り・11の効果は無関係になるのでリセットする)
     state.field = cards;
+    state.fieldType = playType;
+    state.fieldDeclaredRank = declaredRank;
     state.passCount = 0;
     state.sequenceLock = false;
     state.lastPlaySuits = null;
@@ -203,12 +303,14 @@ export function playGroup(state, playerIndex, cards, options = {}) {
     state.sandstormLock = true;
   } else {
     // 階段縛りの判定・更新 (場と同じ枚数の組同士で連番になったら発動)
-    updateSequenceLock(state, cards, effectiveRevolution);
+    updateSequenceLock(state, cards, effectiveRevolution, playType, declaredRank);
 
     // 記号縛りの判定・更新 (直前の組と共通するスートが1つでもあれば、そのスートで発動)
     updateSuitLock(state, playSuits);
 
     state.field = cards;
+    state.fieldType = playType;
+    state.fieldDeclaredRank = declaredRank;
     state.passCount = 0;
   }
 
@@ -233,6 +335,20 @@ export function playGroup(state, playerIndex, cards, options = {}) {
     advanceTurn(state);
   }
 
+  // 5スキップ等で他の全プレイヤーを飛ばし、出した本人まで手番が一周してしまった場合は、
+  // 誰もそのカードに挑戦する機会がなかったことになるので、パスで全員流れた時と同様に場を流す
+  if (!justFinished && state.turn === playerIndex) {
+    state.field = null;
+    state.fieldType = null;
+    state.fieldDeclaredRank = null;
+    state.passCount = 0;
+    state.sequenceLock = false;
+    state.lastPlaySuits = null;
+    state.suitLock = null;
+    state.elevenEffect = null;
+    state.sandstormLock = false;
+  }
+
   return state;
 }
 
@@ -241,6 +357,11 @@ function peekNextPlayer(state, fromIndex) {
   const playerCount = state.hands.length;
   let next = (fromIndex + state.direction + playerCount) % playerCount;
 
+  // `finished.length < playerCount` は無限ループ防止のガード。
+  // 通常はisGameOverが「1人を除いて全員上がったら終了」を見ているので発生しないが、
+  // 12の効果(forceDiscardByRanks)で残り全員の手札が同時に0になるようなケースでは
+  // finished.length === playerCount になり得る。その場合このガードがないと
+  // 「全員finished済み」で次のプレイヤーが永遠に見つからず無限ループする。
   while (state.finished.includes(next) && state.finished.length < playerCount) {
     next = (next + state.direction + playerCount) % playerCount;
   }
@@ -299,15 +420,18 @@ function forceDiscardByRanks(state, ranks) {
 
 // 階段縛りの判定・更新を行う (playGroup内、場を更新する前に呼ぶ)
 // 場と枚数が同じ組同士で、代表の数字がちょうど+1になっていれば発動する
-function updateSequenceLock(state, cards, effectiveRevolution) {
+// playType/declaredRank: 今回出すcardsについて、呼び出し側で解決済みのものを渡す
+function updateSequenceLock(state, cards, effectiveRevolution, playType, declaredRank) {
   const prevField = state.field;
+  const prevFieldType = state.fieldType;
+  const prevFieldDeclaredRank = state.fieldDeclaredRank;
 
   // 既に発動中なら、そのカードを出せた時点で連番は続いているので維持する
   if (state.sequenceLock) return;
 
   if (prevField && cards.length === prevField.length) {
-    const prevStrength = getPlayStrength(prevField, effectiveRevolution);
-    const newStrength = getPlayStrength(cards, effectiveRevolution);
+    const prevStrength = getPlayStrength(prevField, effectiveRevolution, prevFieldType, prevFieldDeclaredRank);
+    const newStrength = getPlayStrength(cards, effectiveRevolution, playType, declaredRank);
     if (newStrength === prevStrength + 1) {
       state.sequenceLock = true;
     }
@@ -339,6 +463,8 @@ export function passTurn(state) {
   const activePlayers = state.hands.length - state.finished.length;
   if (state.passCount >= activePlayers - 1) {
     state.field = null;
+    state.fieldType = null;
+    state.fieldDeclaredRank = null;
     state.passCount = 0;
     state.sequenceLock = false;
     state.lastPlaySuits = null;

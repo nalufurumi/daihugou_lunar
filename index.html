@@ -184,6 +184,17 @@
     <button class="cta" id="startBtn">配って始める</button>
   </div>
 
+  <!-- 役選択オーバーレイ（組にも階段にも解釈できるカードを出した時だけ表示） -->
+  <div class="overlay hidden" id="playAsOverlay">
+    <div class="kicker">どちらの役で出す？</div>
+    <p>選んだカードは組としても階段としても出せます。</p>
+    <div style="display:flex;gap:12px;">
+      <button class="cta" id="playAsGroupBtn">組で出す</button>
+      <button class="cta" id="playAsStraightBtn">階段で出す</button>
+    </div>
+    <button class="ghost-cta" id="playAsCancelBtn">やめる</button>
+  </div>
+
   <!-- 手番受け渡しオーバーレイ（前の人の手札を隠す） -->
   <div class="overlay hidden" id="handoffOverlay">
     <div class="kicker">Pass &amp; Play</div>
@@ -206,7 +217,7 @@
 
 <script type="module">
   // 実エンジン（りゅうせい作）をそのまま利用。UI側は state を読んで描くだけ。
-  import { createDeck, shuffleDeck, dealCards, sortHand } from './card.js';
+  import { createDeck, shuffleDeck, dealCards, sortHand, getPossiblePlayTypes } from './card.js';
   import { createGameState, playGroup, passTurn, isGameOver } from './game.js';
 
   // ---- カード表示のためのヘルパ ----
@@ -299,16 +310,40 @@
     const el = $('hand'); el.innerHTML = '';
     const n = hand.length;
     const center = (n - 1) / 2;
+
+    // 画面幅に合わせてカードサイズと重なり幅を自動計算する（スマホでスクロールが要らないように）
+    const containerW = el.clientWidth || document.getElementById('app').clientWidth || 375;
+    const sidePadding = 16; // 左右の余白
+    const usableW = Math.max(containerW - sidePadding * 2, 160);
+    const maxCardW = 62, minCardW = 34, minXstep = 9;
+    let cardW = maxCardW;
+    let xstep = n > 1 ? Math.min(30, 300 / n) : 0;
+    let totalSpan = (n - 1) * xstep + cardW;
+    if (totalSpan > usableW && n > 1) {
+      // まずは重なりを増やして詰める
+      xstep = Math.max(minXstep, (usableW - cardW) / (n - 1));
+      totalSpan = (n - 1) * xstep + cardW;
+      if (totalSpan > usableW) {
+        // それでも収まらなければカード自体を縮める
+        cardW = Math.max(minCardW, usableW - (n - 1) * minXstep);
+        xstep = Math.max(minXstep, (usableW - cardW) / (n - 1));
+      }
+    }
+    const cardH = Math.round(cardW * (88 / 62));
+    const fontPx = Math.max(11, Math.round(14 * (cardW / maxCardW)));
+
     const spread = Math.min(6, 44 / Math.max(n,1)); // 枚数が多いほど角度を詰める
     hand.forEach((card, i) => {
       const c = cardEl(card);
       c.classList.add('hand-card');
       c.tabIndex = 0;
+      c.style.width = cardW + 'px';
+      c.style.height = cardH + 'px';
+      c.style.fontSize = fontPx + 'px';
       const off = i - center;
       // 下端を軸に扇状：中央から外へ回転＋端ほど少し下がる弧
       const rot = off * spread;
       const arc = Math.pow(Math.abs(off), 1.2) * 4;
-      const xstep = Math.min(30, 300 / Math.max(n,1)); // 重なり幅
       const x = off * xstep;
       const base = `translateX(calc(-50% + ${x}px)) translateY(${arc}px) rotate(${rot}deg)`;
       c.dataset.base = base;
@@ -341,15 +376,43 @@
     const turnBefore = state.turn;
     // 選択を手札の並び順にそろえてから渡す
     const cards = state.hands[turnBefore].filter(c => selected.includes(c));
+
+    // 組としても階段としても成立するカード（実カード1枚+ジョーカー2枚 等）は、
+    // どちらの役で出すかをプレイヤーに選ばせる。1通りしかなければ今まで通り自動判定に任せる
+    const possibleTypes = getPossiblePlayTypes(cards);
+    if (possibleTypes.length > 1) {
+      askPlayAs(possibleTypes, (playAs) => {
+        if (playAs) tryPlay(turnBefore, cards, { playAs });
+      });
+      return;
+    }
+    tryPlay(turnBefore, cards, {});
+  });
+
+  function tryPlay(turnBefore, cards, options){
     try {
-      playGroup(state, turnBefore, cards); // 無効手はここで例外。ルール判定はエンジンに任せる
+      playGroup(state, turnBefore, cards, options); // 無効手はここで例外。ルール判定はエンジンに任せる
     } catch (e) {
       toast(e.message); // 「階段縛りにより…」等をそのまま表示
       return;
     }
     selected = [];
     afterAction(turnBefore);
-  });
+  }
+
+  // 組/階段どちらで出すかをプレイヤーに選ばせるオーバーレイ
+  function askPlayAs(possibleTypes, onChoose){
+    $('playAsOverlay').classList.remove('hidden');
+    const cleanup = () => {
+      $('playAsOverlay').classList.add('hidden');
+      $('playAsGroupBtn').onclick = null;
+      $('playAsStraightBtn').onclick = null;
+      $('playAsCancelBtn').onclick = null;
+    };
+    $('playAsGroupBtn').onclick = () => { cleanup(); onChoose('group'); };
+    $('playAsStraightBtn').onclick = () => { cleanup(); onChoose('straight'); };
+    $('playAsCancelBtn').onclick = () => { cleanup(); onChoose(null); };
+  }
 
   // ---- パス ----
   $('passBtn').addEventListener('click', () => {
@@ -368,7 +431,7 @@
   }
 
   // ---- オーバーレイ制御 ----
-  function hideAll(){ ['startOverlay','handoffOverlay','resultOverlay'].forEach(id => $(id).classList.add('hidden')); }
+  function hideAll(){ ['startOverlay','handoffOverlay','resultOverlay','playAsOverlay'].forEach(id => $(id).classList.add('hidden')); }
   function showHandoff(){
     $('handoffName').textContent = names(state.turn);
     $('handoffOverlay').classList.remove('hidden');
