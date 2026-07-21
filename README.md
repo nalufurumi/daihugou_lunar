@@ -36,3 +36,6 @@ python3 -m http.server 8000
 ## 開発ルール
 
 ブランチ運用やPRの作り方は [CONTRIBUTING.md](./CONTRIBUTING.md) を参照してください。
+
+非エンジニアのメンバーは、まず **[開発者ページ (dev.html)](./dev.html)** を見てください。
+GitHub Desktopでの基本操作・よくある詰まりポイントを、専門用語なしでまとめてあります。
