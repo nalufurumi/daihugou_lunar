@@ -470,6 +470,27 @@
     const cardH = Math.round(cardW * ratio);
     const fontPx = Math.max(11, Math.round(14 * (cardW / maxCardW)));
 
+    // タップ判定は「DOM上で一番上に重なっている札」ではなく「見た目の中心に一番近い札」で行う。
+    // 扇が詰まっている時（3人戦で18枚等）は、重なりの下になった札の実クリック領域が
+    // 十数pxしかなくなり、狙った札を押せなくなるため
+    const toggleAt = (i) => {
+      const card = hand[i];
+      const at = selected.indexOf(card);
+      if (at >= 0) selected.splice(at, 1); else selected.push(card);
+      renderHand(hand); updateActions();
+    };
+    el.onclick = (e) => {
+      if (!hand.length) return;
+      const rect = el.getBoundingClientRect();
+      const clickX = e.clientX - rect.left - rect.width / 2; // 扇の中心を0とした相対x
+      let best = 0, bestDist = Infinity;
+      hand.forEach((_, i) => {
+        const d = Math.abs(clickX - (i - center) * xstep);
+        if (d < bestDist) { bestDist = d; best = i; }
+      });
+      toggleAt(best);
+    };
+
     hand.forEach((card, i) => {
       const c = cardEl(card);
       c.classList.add('hand-card');
@@ -489,13 +510,8 @@
       c.style.zIndex = i;
       const isSel = selected.includes(card);
       if (isSel){ c.classList.add('selected'); c.style.transform = `translateX(calc(-50% + ${x}px)) translateY(-26px) rotate(0deg)`; }
-      const toggle = () => {
-        const at = selected.indexOf(card);
-        if (at >= 0) selected.splice(at,1); else selected.push(card);
-        renderHand(hand); updateActions();
-      };
-      c.addEventListener('click', toggle);
-      c.addEventListener('keydown', e => { if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggle(); }});
+      // キーボード操作は実際にフォーカスしている札そのものを対象にする（重なりの影響を受けない）
+      c.addEventListener('keydown', e => { if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggleAt(i); }});
       el.appendChild(c);
     });
   }
@@ -720,7 +736,14 @@
   function titleSet(n){
     if (n <= 2) return ['勝ち','負け'];
     const t = new Array(n).fill('平民');
-    t[0]='大富豪'; t[1]='富豪'; t[n-2]='貧民'; t[n-1]='大貧民';
+    t[0] = '大富豪';
+    t[n - 1] = '大貧民';
+    // 3人だとt[1]とt[n-2]が同じ枠になり「富豪」を「貧民」で上書きしてしまうので、
+    // 中間の富豪/貧民は4人以上の時だけ割り当てる（3人は 大富豪/平民/大貧民 になる）
+    if (n >= 4) {
+      t[1] = '富豪';
+      t[n - 2] = '貧民';
+    }
     return t;
   }
 

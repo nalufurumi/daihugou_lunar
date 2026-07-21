@@ -20,18 +20,20 @@ export function compareCards(cardA, cardB, revolution = false) {
   return 0;
 }
 
-// 山札54枚(ジョーカー2枚を含む)を生成する
-export function createDeck() {
+// 山札を生成する (1デッキ54枚、ジョーカー2枚を含む。deckCountで複数デッキ分をまとめて生成できる)
+export function createDeck(deckCount = 1) {
   const deck = [];
 
-  for (const suit of SUITS) {
-    for (let rank = 1; rank <= 13; rank++) {
-      deck.push({ suit, rank });
+  for (let d = 0; d < deckCount; d++) {
+    for (const suit of SUITS) {
+      for (let rank = 1; rank <= 13; rank++) {
+        deck.push({ suit, rank });
+      }
     }
-  }
 
-  deck.push({ suit: 'joker', rank: null });
-  deck.push({ suit: 'joker', rank: null });
+    deck.push({ suit: 'joker', rank: null });
+    deck.push({ suit: 'joker', rank: null });
+  }
 
   return deck;
 }
@@ -115,6 +117,30 @@ export function isValidStraight(cards) {
   return gapsNeeded <= jokers.length;
 }
 
+// 階段が実際にカバーしている数字の配置には、実カードの間を埋めるのに必要な数より
+// ジョーカーが多い場合、複数の解釈があり得る (例: 6,7,8,ジョーカー なら「5〜8」でも「6〜9」でも成立する)
+// その候補となる開始rank (一番弱いカードのrank) を弱い方から順に全て返す
+export function getStraightStartCandidates(cards) {
+  if (!isValidStraight(cards)) return [];
+
+  const reals = cards.filter((c) => c.suit !== 'joker');
+  const strengths = reals.map((c) => getStrength(c));
+  const minS = Math.min(...strengths);
+  const maxS = Math.max(...strengths);
+  const length = cards.length;
+
+  // 実カードが収まる範囲で開始位置が動ける幅: [maxS-length+1, minS]
+  // (これより下げると一番強い実カードがはみ出す、上げると一番弱い実カードがはみ出す)
+  const lowStart = Math.max(0, maxS - length + 1);
+  const highStart = Math.min(minS, RANK_ORDER.length - length);
+
+  const candidates = [];
+  for (let s = lowStart; s <= highStart; s++) {
+    candidates.push(RANK_ORDER[s]);
+  }
+  return candidates;
+}
+
 // 出そうとしているカード群の種類を判定する ('group' | 'straight' | 'invalid')
 // 階段としても組としても解釈できる場合 (実カード1枚+ジョーカー2枚など) は階段を優先する。
 // どちらか一方をプレイヤーに選ばせたい場合は getPossiblePlayTypes を使う
@@ -135,21 +161,42 @@ export function getPossiblePlayTypes(cards) {
 
 // 階段として出したカード群が実際にカバーしている数字の一覧を返す (ジョーカーで埋めた数字も含む)
 // 例: 3,4,ジョーカー,6 の階段なら [3,4,5,6] を返す (ジョーカーが5を埋めている)
-// 実カードの最小値を起点に、出した枚数ぶんだけ連番を並べる (末尾の余りジョーカーで上に延長する
-// getStraightStrengthの規則と揃えてある)。階段として不成立なカード群を渡した場合は空配列を返す
-export function getStraightRanks(cards) {
+// startRank: 一番弱いカードのrankを明示したい場合に指定する (候補は getStraightStartCandidates を使う)。
+// 省略時は、実カードの最小rankを起点に上へ延長する (従来の挙動)。
+// 階段として不成立なカード群を渡した場合は空配列を返す
+export function getStraightRanks(cards, startRank = null) {
   if (!isValidStraight(cards)) return [];
 
   const reals = cards.filter((c) => c.suit !== 'joker');
-  const minS = Math.min(...reals.map((c) => getStrength(c)));
+  const defaultStartIdx = Math.min(...reals.map((c) => getStrength(c)));
+  const startIdx = startRank != null ? RANK_ORDER.indexOf(startRank) : defaultStartIdx;
 
   const ranks = [];
   for (let i = 0; i < cards.length; i++) {
-    const idx = minS + i;
+    const idx = startIdx + i;
     if (idx < 0 || idx >= RANK_ORDER.length) break; // 序列の範囲外は無視 (通常は起こらない)
     ranks.push(RANK_ORDER[idx]);
   }
   return ranks;
+}
+
+// 階段として出す(出した)カード群を、実際に表している位置の順番に並べ替えて返す
+// (ジョーカーが埋めている数字の位置に来るようにする)。例: 4,ジョーカー,6,7 → [4,ジョーカー,6,7]
+// (ジョーカーは5の位置なので、4と6の間に来る)
+// startRank: getStraightRanksと同じ意味 (省略時は実カードの最小rankを起点に上へ延長する従来の挙動)
+// 階段として不成立なカード群を渡した場合は、元の配列をそのまま返す (並べ替えない)
+export function orderStraightForDisplay(cards, startRank = null) {
+  if (!isValidStraight(cards)) return [...cards];
+
+  const ranks = getStraightRanks(cards, startRank);
+  const jokers = cards.filter((c) => c.suit === 'joker');
+  const byRank = new Map();
+  for (const c of cards) {
+    if (c.suit !== 'joker') byRank.set(c.rank, c);
+  }
+
+  let jokerIdx = 0;
+  return ranks.map((r) => byRank.get(r) ?? jokers[jokerIdx++]);
 }
 
 // グループの強さを取得する (ジョーカー以外の代表rankで判定)
@@ -163,28 +210,33 @@ export function getGroupStrength(cards, revolution = false, declaredRank = null)
   return Infinity;
 }
 
-// 階段の強さを取得する (一番強い実カードを基準に、末尾側の余りジョーカー分も加味)
-export function getStraightStrength(cards, revolution = false) {
-  const jokers = cards.filter((c) => c.suit === 'joker').length;
+// 階段の強さを取得する (一番強い側のカードを基準に判定)
+// startRank: getStraightRanksと同じ意味。省略時は実カードの最小rankを起点に上へ延長する(従来の挙動)
+export function getStraightStrength(cards, revolution = false, startRank = null) {
   const reals = cards.filter((c) => c.suit !== 'joker');
   if (reals.length === 0) return Infinity;
 
-  const strengths = reals.map((c) => getStrength(c, revolution));
-  const maxS = Math.max(...strengths);
-  const minS = Math.min(...strengths);
-  const span = maxS - minS + 1;
-  const extraJokers = jokers - (span - reals.length); // 内部の穴埋めに使わなかった余りジョーカー
+  const defaultStartIdx = Math.min(...reals.map((c) => getStrength(c)));
+  const startIdx = startRank != null ? RANK_ORDER.indexOf(startRank) : defaultStartIdx;
+  const topIdx = startIdx + cards.length - 1;
 
-  return maxS + Math.max(extraJokers, 0);
+  return revolution ? RANK_ORDER.length - 1 - topIdx : topIdx;
 }
 
 // 出そうとしているカード群の強さを、種類に応じて取得する
 // playTypeを明示的に渡すと、階段/組どちらとして扱うかを自動判定に任せず固定できる
 // (実カード1枚+ジョーカー2枚のような、両方に解釈できる組をプレイヤーが選択した場合など)
 // declaredRankは、全部ジョーカーの組('group')が代表する数字を明示したい場合に使う
-export function getPlayStrength(cards, revolution = false, playType = getPlayType(cards), declaredRank = null) {
+// straightStartRankは、階段('straight')の開始rankを明示したい場合に使う (getStraightRanks参照)
+export function getPlayStrength(
+  cards,
+  revolution = false,
+  playType = getPlayType(cards),
+  declaredRank = null,
+  straightStartRank = null
+) {
   return playType === 'straight'
-    ? getStraightStrength(cards, revolution)
+    ? getStraightStrength(cards, revolution, straightStartRank)
     : getGroupStrength(cards, revolution, declaredRank);
 }
 
@@ -230,6 +282,7 @@ export function isSandstormPlay(cards) {
 // playType/fieldType: 明示的に渡すと、その役 (group/straight) として扱う。
 // 省略時は自動判定 (getPlayType) を使う従来通りの挙動
 // declaredRank/fieldDeclaredRank: 全部ジョーカーの組が代表する数字 (playGroup側/fieldGroup側それぞれ)
+// straightStartRank/fieldStraightStartRank: 階段の開始rank (playGroup側/fieldGroup側それぞれ)
 export function canPlayGroup(
   playGroup,
   fieldGroup,
@@ -237,7 +290,9 @@ export function canPlayGroup(
   playType = getPlayType(playGroup),
   fieldType = fieldGroup ? getPlayType(fieldGroup) : null,
   declaredRank = null,
-  fieldDeclaredRank = null
+  fieldDeclaredRank = null,
+  straightStartRank = null,
+  fieldStraightStartRank = null
 ) {
   if (playType === 'invalid') return false;
 
@@ -257,7 +312,7 @@ export function canPlayGroup(
   if (playGroup.length !== fieldGroup.length) return false;
 
   return (
-    getPlayStrength(playGroup, revolution, playType, declaredRank) >
-    getPlayStrength(fieldGroup, revolution, fieldType, fieldDeclaredRank)
+    getPlayStrength(playGroup, revolution, playType, declaredRank, straightStartRank) >
+    getPlayStrength(fieldGroup, revolution, fieldType, fieldDeclaredRank, fieldStraightStartRank)
   );
 }

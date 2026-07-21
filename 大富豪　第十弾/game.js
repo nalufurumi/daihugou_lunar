@@ -1,3 +1,5 @@
+// ⚠️ 注意: このファイルは過去のスナップショット（アーカイブ）です。本番のindex.htmlはリポジトリ直下のcard.js/game.jsだけを読み込みます。
+// ロジックを直す/機能を足す時は、直下の card.js / game.js を直接編集してください（詳細はCONTRIBUTING.md参照）。
 import {
   canPlayGroup,
   getPlayStrength,

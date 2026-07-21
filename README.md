@@ -1,16 +1,38 @@
-# React + Vite
+# DFG 大富豪
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+スマホ1台をまわして遊ぶ、パス&プレイ版の大富豪です。Lunarチームの制作物のひとつ。
 
-Currently, two official plugins are available:
+## これは何でできているか
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **フレームワークなし**。Vite/Reactは使っていません（生成時のテンプレートの名残でREADMEがそう書かれていましたが実態と違っていたため書き直しました）
+- `index.html` 1枚だけで動く静的サイトです。HTML/CSS/JSが全部この中に入っています
+- ゲームロジック（ルール判定）は `card.js` と `game.js` に分離してあります
 
-## React Compiler
+```
+index.html   … 画面・UI・入出力（DOM操作のみ、フレームワーク不使用）
+card.js      … カード単体の判定（強さ・役の種類・階段の解釈 など）
+game.js      … ゲーム全体の進行（手番・場・特殊効果・勝敗判定 など）
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 動かし方
 
-## Expanding the ESLint configuration
+ビルドは不要です。`index.html` をブラウザで開くか、ローカルサーバーで配信するだけで動きます。
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+python3 -m http.server 8000
+# http://localhost:8000/index.html を開く
+```
+
+本番は Vercel（GitHub連携で `main` に push すると自動デプロイ）です。
+
+## ⚠️ 「大富豪　第◯弾」フォルダについて
+
+`大富豪　第七弾/` のような番号付きフォルダは**過去のスナップショット（アーカイブ）**で、
+ゲームには一切使われていません。**index.htmlが読み込むのはリポジトリ直下の`card.js`/`game.js`だけ**です。
+
+ロジックを直す・機能を足す時は、必ず直下の`card.js`/`game.js`を直接編集してください。
+詳しくは [CONTRIBUTING.md](./CONTRIBUTING.md) を参照。
+
+## 開発ルール
+
+ブランチ運用やPRの作り方は [CONTRIBUTING.md](./CONTRIBUTING.md) を参照してください。
