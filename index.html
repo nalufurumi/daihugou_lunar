@@ -153,8 +153,10 @@
   .seat-row input::placeholder{color:var(--text-faint); font-weight:500;}
 
   /* 7/10: 手札からカードを選ばせるグリッド */
+  /* .card内の数字・記号はposition:absoluteなので、ここでstaticにすると基準が画面全体になり
+     数字が消えて画面を覆ってしまう。必ずrelativeを保つこと */
   .pick-grid{display:flex; flex-wrap:wrap; gap:8px; justify-content:center; max-width:340px;}
-  .pick-grid .card{position:static; width:52px; height:74px; font-size:13px; cursor:pointer;}
+  .pick-grid .card{position:relative; width:52px; height:74px; font-size:13px; cursor:pointer;}
   .pick-grid .card.selected{box-shadow:0 10px 20px -6px rgba(220,178,79,.6); outline:2px solid var(--gold); transform:translateY(-6px);}
 
   /* 12: 数字を選ばせるグリッド */
@@ -539,9 +541,10 @@
 
     if (playType === 'group' || playType === 'straight') {
       if (willTrigger(7)) {
-        // 渡せるカードが足りない（手札が少ない終盤等）場合は無理に選ばせず効果なしにする
-        const need = Math.min(magnitude(7), pool.length);
-        if (need > 0) {
+        // エンジンは「出した枚数ちょうど」を要求するので、手札が足りない終盤に
+        // 半端な枚数を渡すと正当な手まで弾かれてしまう。足りない時は効果なしで出す
+        const need = magnitude(7);
+        if (need > 0 && pool.length >= need) {
           const chosen = await pickCards(pool, need, `7: 次の人に渡すカードを${need}枚選んでください`);
           if (!chosen) { return; } // 「出すのをやめる」
           options.giveCards = chosen;
@@ -549,8 +552,8 @@
         }
       }
       if (willTrigger(10)) {
-        const need = Math.min(magnitude(10), pool.length);
-        if (need > 0) {
+        const need = magnitude(10);
+        if (need > 0 && pool.length >= need) {
           const chosen = await pickCards(pool, need, `10: 捨てるカードを${need}枚選んでください`);
           if (!chosen) { return; }
           options.discardCards = chosen;
@@ -703,7 +706,12 @@
     full.forEach((pi, idx) => {
       const row = document.createElement('div');
       row.className = 'result-row' + (idx===0?' top':'') + (idx===full.length-1?' bottom':'');
-      row.innerHTML = `<span class="rank">${idx+1}</span><span class="nm">${names(pi)}</span><span class="title">${titles[idx]}</span>`;
+      // 名前はプレイヤーが自由に入力できるので、innerHTMLで組み立てるとHTMLとして
+      // 解釈されてしまう。textContentで入れること
+      const rank = document.createElement('span'); rank.className = 'rank'; rank.textContent = idx + 1;
+      const nm   = document.createElement('span'); nm.className   = 'nm';   nm.textContent   = names(pi);
+      const ttl  = document.createElement('span'); ttl.className  = 'title'; ttl.textContent = titles[idx];
+      row.append(rank, nm, ttl);
       list.appendChild(row);
     });
     $('resultOverlay').classList.remove('hidden');
