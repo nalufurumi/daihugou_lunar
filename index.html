@@ -121,6 +121,37 @@
   .cta{background:linear-gradient(180deg,var(--gold-hi),var(--gold-lo)); color:var(--gold-ink); font-weight:800; font-size:17px; padding:16px 40px; border-radius:16px; border:none; cursor:pointer; box-shadow:0 16px 34px -12px rgba(220,178,79,.7);}
   .ghost-cta{background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12); color:var(--text); font-weight:700; font-size:14px; padding:13px 26px; border-radius:14px; cursor:pointer;}
 
+  /* ===== ヒーロー（タイトル画面） ===== */
+  .hero-fan{position:relative; height:104px; width:100%; display:flex; justify-content:center; margin-bottom:2px;}
+  .hero-fan .card{position:absolute; bottom:0; width:56px; height:80px; font-size:13px; transform-origin:bottom center; opacity:.96;}
+  .hero-title{font-family:var(--font-serif); font-weight:400; font-size:56px; line-height:.95; margin:0;}
+  .hero-title .jp{font-style:italic; color:var(--gold); display:block;}
+  .hero-tag{color:var(--text-soft); font-size:14px; line-height:1.7; max-width:270px; margin:0;}
+  .hero-chips{display:flex; gap:6px; flex-wrap:wrap; justify-content:center;}
+  .hero-foot{position:absolute; left:0; right:0; bottom:calc(20px + env(safe-area-inset-bottom)); text-align:center; color:var(--text-faint); font-size:11px; letter-spacing:.14em;}
+
+  /* ===== ロビー（人数・名前の設定） ===== */
+  /* ヒーロー/ロビーはモーダルではなく独立した画面なので、背後を透かさず塗りつぶす */
+  .overlay.solid{
+    background:radial-gradient(120% 70% at 50% 6%, var(--felt-lit) 0%, #123a2d 40%, var(--pine) 100%);
+    backdrop-filter:none;
+  }
+  /* 中身が多い時だけスクロールし、少ない時は上下中央に置く */
+  .overlay.scrollable{justify-content:flex-start; overflow-y:auto;}
+  .overlay.scrollable > .screen-inner{
+    margin:auto 0; display:flex; flex-direction:column; align-items:center;
+    gap:var(--sp-6); width:100%; padding:var(--sp-6) 0;
+  }
+  .lobby-block{width:100%; max-width:310px;}
+  .lobby-label{color:var(--text-mute); font-size:12px; margin-bottom:10px; letter-spacing:.08em;}
+  .seat-list{display:flex; flex-direction:column; gap:8px;}
+  .seat-row{display:flex; align-items:center; gap:11px; background:rgba(255,255,255,.05); border:1px solid var(--line); border-radius:13px; padding:9px 13px; transition:border-color var(--dur) var(--ease);}
+  .seat-row:focus-within{border-color:var(--gold-line); background:rgba(220,178,79,.08);}
+  .seat-row .seat-no{font-family:var(--font-serif); font-size:19px; color:var(--gold); width:20px; flex:0 0 auto; text-align:center;}
+  /* font-size:16px未満だとiOSで自動ズームが入るので下げない */
+  .seat-row input{flex:1; min-width:0; background:transparent; border:none; outline:none; color:var(--text); font-family:var(--font-ui); font-weight:700; font-size:16px; padding:2px 0;}
+  .seat-row input::placeholder{color:var(--text-faint); font-weight:500;}
+
   /* 7/10: 手札からカードを選ばせるグリッド */
   .pick-grid{display:flex; flex-wrap:wrap; gap:8px; justify-content:center; max-width:340px;}
   .pick-grid .card{position:static; width:52px; height:74px; font-size:13px; cursor:pointer;}
@@ -183,16 +214,40 @@
   <div class="toast" id="toast"></div>
 
   <!-- 開始オーバーレイ -->
-  <div class="overlay" id="startOverlay">
-    <div class="kicker">Party Card Game · Local</div>
-    <h1>DFG <span style="font-style:italic;color:var(--gold);">大富豪</span></h1>
-    <p>1台で回すパス&プレイ版。人数を選んで、順番に手札を見て出していきます。</p>
+  <!-- ヒーロー（最初に出るタイトル画面） -->
+  <div class="overlay solid" id="heroOverlay">
+    <div class="hero-fan" id="heroFan"></div>
     <div>
-      <div style="color:var(--text-mute);font-size:12px;margin-bottom:10px;">人数</div>
-      <div class="count-pick" id="countPick"></div>
+      <div class="kicker" style="margin-bottom:10px;">Party Card Game · Local</div>
+      <h1 class="hero-title">DFG <span class="jp">大富豪</span></h1>
     </div>
-    <button class="cta" id="startBtn">配って始める</button>
+    <p class="hero-tag">スマホ1台をまわして遊ぶ<br>パス&プレイ版の大富豪です。</p>
+    <div class="hero-chips">
+      <span class="chip">3〜6人</span>
+      <span class="chip">革命・8切り</span>
+      <span class="chip">7・10・12の効果</span>
+    </div>
+    <button class="cta" id="heroStartBtn">はじめる</button>
+    <div class="hero-foot">LUNAR</div>
   </div>
+
+  <!-- ロビー（人数とプレイヤー名を決める） -->
+  <div class="overlay hidden solid scrollable" id="lobbyOverlay">
+    <div class="screen-inner">
+      <div class="kicker">Lobby</div>
+      <div class="lobby-block">
+        <div class="lobby-label">人数</div>
+        <div class="count-pick" id="countPick" style="justify-content:center;"></div>
+      </div>
+      <div class="lobby-block">
+        <div class="lobby-label">プレイヤー名（空欄なら「プレイヤー◯」）</div>
+        <div class="seat-list" id="seatList"></div>
+      </div>
+      <button class="cta" id="startBtn">配って始める</button>
+      <button class="ghost-cta" id="lobbyBackBtn">もどる</button>
+    </div>
+  </div>
+
 
   <!-- 7/10の効果: 手札からカードを選ばせるオーバーレイ（渡す/捨てる 共通） -->
   <div class="overlay hidden" id="pickCardsOverlay">
@@ -278,20 +333,64 @@
   let state = null;
   let playerCount = 4;
   let selected = [];            // 選択中カードの参照配列
-  const names = i => `プレイヤー${i + 1}`;
+  let playerNames = [];         // ロビーで入力された名前（空文字なら既定名にフォールバック）
+  const names = i => (playerNames[i] || '').trim() || `プレイヤー${i + 1}`;
 
   const $ = id => document.getElementById(id);
 
-  // ---- 開始（人数選択 → 配る） ----
+  // ---- ヒーロー：飾りの扇（実際のカード描画を使いまわす） ----
+  function buildHeroFan(){
+    const fan = $('heroFan'); fan.innerHTML = '';
+    const deco = [
+      {suit:'spade', rank:3},
+      {suit:'heart', rank:1},
+      {suit:'joker'},
+      {suit:'diamond', rank:13},
+      {suit:'club', rank:2},
+    ];
+    const center = (deco.length - 1) / 2;
+    deco.forEach((card, i) => {
+      const c = cardEl(card);
+      const off = i - center;
+      c.style.transform = `translateX(${off * 34}px) translateY(${Math.pow(Math.abs(off),1.3) * 6}px) rotate(${off * 8}deg)`;
+      c.style.zIndex = 10 - Math.abs(off);
+      fan.appendChild(c);
+    });
+  }
+
+  // ---- ロビー（人数選択 → 名前入力 → 配る） ----
   function buildCountPick(){
     const wrap = $('countPick'); wrap.innerHTML = '';
     [3,4,5,6].forEach(n => {
       const b = document.createElement('button');
       b.textContent = n;
       if (n === playerCount) b.classList.add('on');
-      b.onclick = () => { playerCount = n; buildCountPick(); };
+      b.onclick = () => { playerCount = n; buildCountPick(); buildSeatList(); };
       wrap.appendChild(b);
     });
+  }
+
+  function buildSeatList(){
+    const list = $('seatList'); list.innerHTML = '';
+    for (let i = 0; i < playerCount; i++){
+      const row = document.createElement('div');
+      row.className = 'seat-row';
+
+      const no = document.createElement('span');
+      no.className = 'seat-no';
+      no.textContent = i + 1;
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.maxLength = 12;
+      input.placeholder = `プレイヤー${i + 1}`;
+      input.value = playerNames[i] || '';
+      // 人数を変えても入力済みの名前は保持する
+      input.addEventListener('input', () => { playerNames[i] = input.value; });
+
+      row.append(no, input);
+      list.appendChild(row);
+    }
   }
   function deal(){
     const deck = shuffleDeck(createDeck());
@@ -346,23 +445,29 @@
     const sidePadding = 16; // 左右の余白
     const usableW = Math.max(containerW - sidePadding * 2, 160);
     const maxCardW = 62, minCardW = 34, minXstep = 9;
-    let cardW = maxCardW;
-    let xstep = n > 1 ? Math.min(30, 300 / n) : 0;
-    let totalSpan = (n - 1) * xstep + cardW;
-    if (totalSpan > usableW && n > 1) {
-      // まずは重なりを増やして詰める
-      xstep = Math.max(minXstep, (usableW - cardW) / (n - 1));
-      totalSpan = (n - 1) * xstep + cardW;
-      if (totalSpan > usableW) {
-        // それでも収まらなければカード自体を縮める
-        cardW = Math.max(minCardW, usableW - (n - 1) * minXstep);
-        xstep = Math.max(minXstep, (usableW - cardW) / (n - 1));
-      }
-    }
-    const cardH = Math.round(cardW * (88 / 62));
-    const fontPx = Math.max(11, Math.round(14 * (cardW / maxCardW)));
+    const ratio = 88 / 62; // カードの縦横比
 
     const spread = Math.min(6, 44 / Math.max(n,1)); // 枚数が多いほど角度を詰める
+    // 端のカードは回転しているぶん横幅を食う（62x88を20度傾けると実質89px）。
+    // 素の幅で計算すると端がはみ出すので、傾けた後の見かけ幅で場所を取る
+    const maxRot = ((n - 1) / 2) * spread * Math.PI / 180;
+    const widthFactor = Math.cos(maxRot) + ratio * Math.sin(maxRot);
+
+    let cardW = maxCardW;
+    let xstep = n > 1 ? Math.min(30, 300 / n) : 0;
+    const spanOf = (cw, xs) => (n - 1) * xs + cw * widthFactor;
+    if (spanOf(cardW, xstep) > usableW && n > 1) {
+      // まずは重なりを増やして詰める
+      xstep = Math.max(minXstep, (usableW - cardW * widthFactor) / (n - 1));
+      if (spanOf(cardW, xstep) > usableW) {
+        // それでも収まらなければカード自体を縮める
+        cardW = Math.max(minCardW, (usableW - (n - 1) * minXstep) / widthFactor);
+        xstep = Math.max(minXstep, (usableW - cardW * widthFactor) / (n - 1));
+      }
+    }
+    const cardH = Math.round(cardW * ratio);
+    const fontPx = Math.max(11, Math.round(14 * (cardW / maxCardW)));
+
     hand.forEach((card, i) => {
       const c = cardEl(card);
       c.classList.add('hand-card');
@@ -581,7 +686,7 @@
   }
 
   // ---- オーバーレイ制御 ----
-  function hideAll(){ ['startOverlay','handoffOverlay','resultOverlay','playAsOverlay','pickCardsOverlay','pickRanksOverlay'].forEach(id => $(id).classList.add('hidden')); }
+  function hideAll(){ ['heroOverlay','lobbyOverlay','handoffOverlay','resultOverlay','playAsOverlay','pickCardsOverlay','pickRanksOverlay'].forEach(id => $(id).classList.add('hidden')); }
   function showHandoff(){
     $('handoffName').textContent = names(state.turn);
     $('handoffOverlay').classList.remove('hidden');
@@ -611,9 +716,23 @@
     return t;
   }
 
+  // ---- 画面遷移（ヒーロー → ロビー → ゲーム） ----
+  function showLobby(){
+    hideAll();
+    buildCountPick(); buildSeatList();
+    $('lobbyOverlay').classList.remove('hidden');
+    $('lobbyOverlay').scrollTop = 0;
+  }
+  function showHero(){
+    hideAll();
+    $('heroOverlay').classList.remove('hidden');
+  }
+
+  $('heroStartBtn').addEventListener('click', showLobby);
+  $('lobbyBackBtn').addEventListener('click', showHero);
   $('startBtn').addEventListener('click', deal);
-  $('againBtn').addEventListener('click', deal);
-  $('changeCountBtn').addEventListener('click', () => { hideAll(); $('startOverlay').classList.remove('hidden'); });
+  $('againBtn').addEventListener('click', deal);          // 同じ人数・同じ名前でもう一度
+  $('changeCountBtn').addEventListener('click', showLobby); // 人数や名前を変える
 
   // ---- トースト ----
   let toastTimer;
@@ -623,7 +742,9 @@
   }
 
   // 初期化
+  buildHeroFan();
   buildCountPick();
+  buildSeatList();
 </script>
 </body>
 </html>
