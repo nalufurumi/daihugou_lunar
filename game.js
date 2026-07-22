@@ -16,9 +16,26 @@ import {
 } from './card.js';
 
 // ゲームの状態を表すオブジェクト
-export function createGameState(hands) {
+// 使用するルールの既定値。全部trueなので、rulesを渡さなければ従来と完全に同じ挙動になる
+export const DEFAULT_RULES = {
+  revolution: true,   // 革命(4枚以上同時出しで強さが反転)
+  eightCut:   true,   // 8切り(8を含む組で場を流して手番継続)
+  five:       true,   // 5スキップ
+  seven:      true,   // 7渡し
+  nine:       true,   // 9リバース
+  ten:        true,   // 10捨て
+  eleven:     true,   // 11バック/ステイ
+  twelve:     true,   // 12の数字宣言
+  spade3:     true,   // スペードの3でジョーカーを返す
+  sandstorm:  true,   // 砂嵐・ろくろ首(3を3枚)
+  sequenceLock: true, // 階段縛り
+  suitLock:   true,   // 記号(スート)縛り
+};
+
+export function createGameState(hands, rules = {}) {
   return {
     hands,               // 各プレイヤーの手札 [[...], [...]]
+    rules: { ...DEFAULT_RULES, ...rules }, // 使用するルール(オフにした効果は発動しなくなる)
     field: null,          // 場に出ている最後のグループ (カードの配列 or null)
     fieldType: null,      // 場の組が'group'/'straight'どちらとして出されたか (fieldがnullならnull)
     fieldDeclaredRank: null, // 場が全部ジョーカーの組だった場合、それが代表していた数字 (通常はnull)
@@ -34,6 +51,11 @@ export function createGameState(hands) {
     elevenEffect: null,   // 11(バック/ステイ)の効果。null | 'back' | 'stay' (場が流れるまで持続)
     sandstormLock: false, // 砂嵐・ろくろ首が発動中か (発動中は砂嵐・ろくろ首以外出せない)
   };
+}
+
+// stateにrulesが無い場合(古い保存データ等)でも既定値で動くようにする
+function ruleOn(state, key) {
+  return (state.rules ? state.rules[key] : DEFAULT_RULES[key]) !== false;
 }
 
 // 革命とバックは独立した反転要因なので、実際に反転しているかはXORで決める
@@ -149,7 +171,7 @@ export function playGroup(state, playerIndex, cards, options = {}) {
     cards.some((c) => c.rank === rank) || effectiveStraightRanks.includes(rank);
 
   // 砂嵐・ろくろ首の特例 (3を3枚同時出し) は場の状態を問わず出せる例外
-  const isSandstorm = isSandstormPlay(cards);
+  const isSandstorm = ruleOn(state, 'sandstorm') && isSandstormPlay(cards);
 
   // 砂嵐・ろくろ首が発動中は、スペ3を含めどんな例外も無視して砂嵐・ろくろ首以外出せない
   if (state.sandstormLock && !isSandstorm) {
@@ -158,7 +180,7 @@ export function playGroup(state, playerIndex, cards, options = {}) {
 
   // スペ3の特例 (場がジョーカー1枚だけの時にスペードの3を出す) は、
   // 縛り系のルールも含めた通常の制約を無視できる例外なのでここで判定しておく
-  const spade3CounterJoker = isSpade3CounterJoker(cards, state.field);
+  const spade3CounterJoker = ruleOn(state, 'spade3') && isSpade3CounterJoker(cards, state.field);
 
   // ステイ中のJは、J同士だと強さが同じで通常の「場より強くないと出せない」を
   // 満たせなくなってしまうため、通常の強さ比較も例外的にバイパスする
@@ -254,13 +276,13 @@ export function playGroup(state, playerIndex, cards, options = {}) {
   // (革命返しにも対応: どちらの形でも、もう一度発動条件を満たせば元に戻る)
   const isGroupRevolution = cards.length >= 4 && playType === 'group';
   const isStraightRevolution = playType === 'straight' && cards.length >= 4;
-  if (isGroupRevolution || isStraightRevolution) {
+  if (ruleOn(state, 'revolution') && (isGroupRevolution || isStraightRevolution)) {
     state.revolution = !state.revolution;
   }
 
   // 8切り判定: 8を含む組を出すと場が流れ、出した本人の手番が続く (ペア系・階段どちらも対象。
   // 階段でジョーカーが8を埋めている場合も対象に含める)
-  const isEightCut = containsRank(8);
+  const isEightCut = ruleOn(state, 'eightCut') && containsRank(8);
 
   // 効果の大きさ: ペア系は出した枚数、階段はその数字が1枚しかないので常に1
   const magnitude = (rank) => {
@@ -284,21 +306,21 @@ export function playGroup(state, playerIndex, cards, options = {}) {
         : containsRank(9);
     const trigger10 = playType === 'group' ? representativeRank === 10 : containsRank(10);
     const trigger12 = playType === 'group' ? representativeRank === 12 : containsRank(12);
-    trigger11 = playType === 'group' ? representativeRank === 11 : containsRank(11);
+    trigger11 = (playType === 'group' ? representativeRank === 11 : containsRank(11)) && ruleOn(state, 'eleven');
 
-    if (trigger5) {
+    if (trigger5 && ruleOn(state, 'five')) {
       skipCount = magnitude(5);
     }
-    if (trigger9) {
+    if (trigger9 && ruleOn(state, 'nine')) {
       reverseTriggered = true;
     }
-    if (trigger7 && options.giveCards) {
+    if (trigger7 && ruleOn(state, 'seven') && options.giveCards) {
       giveCardsToNextPlayer(state, playerIndex, options.giveCards);
     }
-    if (trigger10 && options.discardCards) {
+    if (trigger10 && ruleOn(state, 'ten') && options.discardCards) {
       discardOwnCards(state, playerIndex, options.discardCards);
     }
-    if (trigger12 && options.declareRanks) {
+    if (trigger12 && ruleOn(state, 'twelve') && options.declareRanks) {
       forceDiscardByRanks(state, options.declareRanks);
     }
   }
@@ -343,10 +365,14 @@ export function playGroup(state, playerIndex, cards, options = {}) {
     state.sandstormLock = true;
   } else {
     // 階段縛りの判定・更新 (場と同じ枚数の組同士で連番になったら発動)
-    updateSequenceLock(state, cards, effectiveRevolution, playType, declaredRank, straightStartRank);
+    if (ruleOn(state, 'sequenceLock')) {
+      updateSequenceLock(state, cards, effectiveRevolution, playType, declaredRank, straightStartRank);
+    }
 
     // 記号縛りの判定・更新 (直前の組と共通するスートが1つでもあれば、そのスートで発動)
-    updateSuitLock(state, playSuits);
+    if (ruleOn(state, 'suitLock')) {
+      updateSuitLock(state, playSuits);
+    }
 
     state.field = cards;
     state.fieldType = playType;
