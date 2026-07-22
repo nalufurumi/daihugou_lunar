@@ -97,7 +97,8 @@
   .hand .card.unplayable{filter:brightness(.55) saturate(.7);}
   .hand .card.selected{
     box-shadow:0 14px 28px -6px rgba(220,178,79,.6); outline:2px solid var(--gold);
-    z-index:60 !important; filter:none;
+    /* 段組みでは各札にz-index(段*100+位置)を振っているので、選択中は必ずその上に来る値にする */
+    z-index:999 !important; filter:none;
   }
 
   /* ===== アクションバー ===== */
@@ -324,6 +325,13 @@
       <button class="cta" id="playAsStraightBtn">階段で出す</button>
     </div>
     <button class="ghost-cta" id="playAsCancelBtn">やめる</button>
+  </div>
+
+  <!-- 11(バック/ステイ)の選択オーバーレイ -->
+  <div class="overlay hidden" id="elevenOverlay">
+    <div class="kicker">11の効果を選んでください</div>
+    <p>11を出したので、場が流れるまで続く効果を選べます。</p>
+    <div id="elevenGrid" style="display:flex; flex-direction:column; gap:10px; width:100%; max-width:280px;"></div>
   </div>
 
   <!-- 階段の開始位置選択（ジョーカーの分、複数の数字範囲で解釈できる時だけ表示） -->
@@ -700,6 +708,10 @@
     const willTrigger = (rank) => (playType === 'group' ? repRank === rank : containsRank(rank));
 
     if (playType === 'group' || playType === 'straight') {
+      // 11(バック/ステイ)。ハウスルールでオフにしている場合は聞かずにスルー扱いにする
+      if (willTrigger(11) && houseRules.eleven) {
+        options.elevenChoice = await pickElevenChoice();
+      }
       if (willTrigger(7)) {
         // エンジンは「出した枚数ちょうど」を要求するので、手札が足りない終盤に
         // 半端な枚数を渡すと正当な手まで弾かれてしまう。足りない時は効果なしで出す
@@ -757,6 +769,29 @@
       $('playAsGroupBtn').onclick = () => { cleanup(); resolve('group'); };
       $('playAsStraightBtn').onclick = () => { cleanup(); resolve('straight'); };
       $('playAsCancelBtn').onclick = () => { cleanup(); resolve(null); };
+    });
+  }
+
+  // 11の効果(スルー/バック/ステイ)を選ばせる。キャンセルは無し(出す判断は済んでいるため)
+  const ELEVEN_CHOICES = [
+    ['through', 'スルー（効果なし）', 'いつも通り進みます'],
+    ['back',    'バック（強さを反転）', '場が流れるまで強弱が逆になります'],
+    ['stay',    'ステイ（Jで固定）',     '場が流れるまでJ同士だけ出せます'],
+  ];
+  function pickElevenChoice(){
+    return new Promise((resolve) => {
+      const grid = $('elevenGrid'); grid.innerHTML = '';
+      ELEVEN_CHOICES.forEach(([value, label, desc]) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'straight-opt';
+        const head = document.createElement('span'); head.textContent = label;
+        const sub = document.createElement('span'); sub.className = 'cards'; sub.textContent = desc;
+        b.append(head, sub);
+        b.onclick = () => { $('elevenOverlay').classList.add('hidden'); resolve(value); };
+        grid.appendChild(b);
+      });
+      $('elevenOverlay').classList.remove('hidden');
     });
   }
 
@@ -877,7 +912,7 @@
   }
 
   // ---- オーバーレイ制御 ----
-  function hideAll(){ ['heroOverlay','lobbyOverlay','handoffOverlay','resultOverlay','playAsOverlay','straightFromOverlay','pickCardsOverlay','pickRanksOverlay'].forEach(id => $(id).classList.add('hidden')); }
+  function hideAll(){ ['heroOverlay','lobbyOverlay','handoffOverlay','resultOverlay','playAsOverlay','elevenOverlay','straightFromOverlay','pickCardsOverlay','pickRanksOverlay'].forEach(id => $(id).classList.add('hidden')); }
   function showHandoff(){
     $('handoffName').textContent = names(state.turn);
     $('handoffOverlay').classList.remove('hidden');
