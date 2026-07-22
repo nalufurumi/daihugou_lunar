@@ -165,6 +165,31 @@
   .rank-btn{width:40px; height:40px; border-radius:10px; border:1px solid var(--gold-line); background:rgba(255,255,255,.05); color:var(--text); font-family:var(--font-ui); font-weight:800; font-size:14px; cursor:pointer;}
   .rank-btn.on{background:linear-gradient(160deg,var(--gold-hi),var(--gold-lo)); color:var(--gold-ink); border-color:transparent;}
 
+  /* ハウスルールのトグル */
+  .rules-toggle{
+    width:100%; display:flex; align-items:center; justify-content:space-between; gap:10px;
+    background:none; border:none; color:var(--text-mute); font-family:var(--font-ui);
+    font-size:12px; letter-spacing:.08em; cursor:pointer; padding:0; margin-bottom:10px;
+  }
+  .rules-toggle::after{content:'+'; color:var(--gold); font-size:17px;}
+  .rules-toggle.open::after{content:'\2013';}
+  .rule-list{display:grid; grid-template-columns:1fr 1fr; gap:7px;}
+  .rule-list[hidden]{display:none;} /* class側のdisplay:gridがhidden属性に勝つため明示的に消す */
+  .rule-chip{
+    display:flex; align-items:center; gap:7px; background:rgba(255,255,255,.05);
+    border:1px solid var(--line); border-radius:11px; padding:8px 11px; cursor:pointer;
+    font-size:13px; font-weight:700; color:var(--text-faint);
+    transition:border-color var(--dur) var(--ease), color var(--dur) var(--ease), background var(--dur) var(--ease);
+  }
+  .rule-chip .mark{
+    width:16px; height:16px; border-radius:5px; border:1px solid var(--gold-line);
+    flex:0 0 auto; display:flex; align-items:center; justify-content:center;
+    font-size:11px; color:var(--gold-ink);
+  }
+  .rule-chip.on{color:var(--text); border-color:var(--gold-line); background:rgba(220,178,79,.08);}
+  .rule-chip.on .mark{background:linear-gradient(160deg,var(--gold-hi),var(--gold-lo)); border-color:transparent;}
+  .rule-chip.on .mark::after{content:'\2713';}
+
   /* 階段の開始位置候補ボタン(5〜8 / 6〜9 等をまるごと1つの選択肢として出す) */
   .straight-opt{
     width:100%; text-align:left; background:rgba(255,255,255,.05); border:1px solid var(--line);
@@ -260,6 +285,10 @@
         <div class="lobby-label">プレイヤー名（空欄なら「プレイヤー◯」）</div>
         <div class="seat-list" id="seatList"></div>
       </div>
+      <div class="lobby-block">
+        <button class="rules-toggle" id="rulesToggle" type="button">使うルール（タップして変更）</button>
+        <div class="rule-list" id="ruleList" hidden></div>
+      </div>
       <button class="cta" id="startBtn">配って始める</button>
       <button class="ghost-cta" id="lobbyBackBtn">もどる</button>
     </div>
@@ -328,7 +357,7 @@
 <script type="module">
   // 実エンジン（りゅうせい作）をそのまま利用。UI側は state を読んで描くだけ。
   import { createDeck, shuffleDeck, dealCards, sortHand, getPossiblePlayTypes, getPlayType, getStraightRanks, getStraightStartCandidates } from './card.js';
-  import { createGameState, playGroup, passTurn, isGameOver, getPlayableCards } from './game.js';
+  import { createGameState, playGroup, passTurn, isGameOver, getPlayableCards, DEFAULT_RULES } from './game.js';
 
   // ---- カード表示のためのヘルパ ----
   const SUIT_SYMBOL = { spade:'♠', heart:'♥', diamond:'♦', club:'♣' };
@@ -358,6 +387,7 @@
   let state = null;
   let playerCount = 4;
   let deckCount = 1;            // 1 or 2。2デッキ(108枚)ならより多い人数で遊べる
+  let houseRules = { ...DEFAULT_RULES };  // 使うルール(既定は全部ON)
   let selected = [];            // 選択中カードの参照配列
   let playerNames = [];         // ロビーで入力された名前（空文字なら既定名にフォールバック）
   const names = i => (playerNames[i] || '').trim() || `プレイヤー${i + 1}`;
@@ -415,6 +445,27 @@
     });
   }
 
+  // 表示名。ここに載せたものだけロビーで切り替えられる
+  const RULE_LABELS = {
+    revolution:'革命', eightCut:'8切り', five:'5スキップ', seven:'7渡し',
+    nine:'9リバース', ten:'10捨て', eleven:'11バック', twelve:'12宣言',
+    spade3:'スペ3返し', sandstorm:'砂嵐', sequenceLock:'階段縛り', suitLock:'記号縛り',
+  };
+
+  function buildRuleList(){
+    const list = $('ruleList'); list.innerHTML = '';
+    Object.entries(RULE_LABELS).forEach(([key, label]) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'rule-chip' + (houseRules[key] ? ' on' : '');
+      const mark = document.createElement('span'); mark.className = 'mark';
+      const txt = document.createElement('span'); txt.textContent = label;
+      chip.append(mark, txt);
+      chip.onclick = () => { houseRules[key] = !houseRules[key]; buildRuleList(); };
+      list.appendChild(chip);
+    });
+  }
+
   function buildSeatList(){
     const list = $('seatList'); list.innerHTML = '';
     for (let i = 0; i < playerCount; i++){
@@ -440,7 +491,7 @@
   function deal(){
     const deck = shuffleDeck(createDeck(deckCount));
     const hands = dealCards(deck, playerCount).map(h => sortHand(h)); // 配って各手札をソート
-    state = createGameState(hands);
+    state = createGameState(hands, houseRules);
     selected = [];
     hideAll();
     render();
@@ -871,7 +922,7 @@
   // ---- 画面遷移（ヒーロー → ロビー → ゲーム） ----
   function showLobby(){
     hideAll();
-    buildDeckPick(); buildCountPick(); buildSeatList();
+    buildDeckPick(); buildCountPick(); buildSeatList(); buildRuleList();
     $('lobbyOverlay').classList.remove('hidden');
     $('lobbyOverlay').scrollTop = 0;
   }
@@ -879,6 +930,12 @@
     hideAll();
     $('heroOverlay').classList.remove('hidden');
   }
+
+  $('rulesToggle').addEventListener('click', () => {
+    const list = $('ruleList');
+    list.hidden = !list.hidden;
+    $('rulesToggle').classList.toggle('open', !list.hidden);
+  });
 
   $('heroStartBtn').addEventListener('click', showLobby);
   $('lobbyBackBtn').addEventListener('click', showHero);
@@ -897,6 +954,7 @@
   buildHeroFan();
   buildDeckPick();
   buildCountPick();
+  buildRuleList();
   buildSeatList();
 </script>
 </body>
