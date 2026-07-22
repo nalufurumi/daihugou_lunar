@@ -483,85 +483,117 @@
   function renderHand(hand){
     const el = $('hand'); el.innerHTML = '';
     const n = hand.length;
-    const center = (n - 1) / 2;
+    if (!n) { el.onclick = null; return; }
 
-    // 画面幅に合わせてカードサイズと重なり幅を自動計算する（スマホでスクロールが要らないように）
     const containerW = el.clientWidth || document.getElementById('app').clientWidth || 375;
-    const sidePadding = 16; // 左右の余白
+    const availH = el.clientHeight || 180;
+    const sidePadding = 16;
     const usableW = Math.max(containerW - sidePadding * 2, 160);
-    const maxCardW = 62, minCardW = 34, minXstep = 9;
-    const ratio = 88 / 62; // カードの縦横比
+    const ratio = 88 / 62;            // カードの縦横比
+    const maxCardW = 62, minCardW = 30, minXstep = 9;
 
-    const spread = Math.min(6, 44 / Math.max(n,1)); // 枚数が多いほど角度を詰める
-    // 端のカードは回転しているぶん横幅を食う（62x88を20度傾けると実質89px）。
-    // 素の幅で計算すると端がはみ出すので、傾けた後の見かけ幅で場所を取る
-    const maxRot = ((n - 1) / 2) * spread * Math.PI / 180;
+    // ---- 段組み ----
+    // 1段に詰め込みすぎると扇が横に広がってボタンに被るので、一定枚数で段を分ける。
+    // 2デッキ3人だと1人36枚になることもあるため、段数は上限を設けず枚数から決める
+    const MAX_PER_ROW = 10;
+    const rows = Math.max(1, Math.ceil(n / MAX_PER_ROW));
+    // 段ごとの枚数をできるだけ均等にする（18枚なら9+9。9+9でなく10+8にはしない）
+    const baseCount = Math.floor(n / rows), extra = n % rows;
+    const rowCounts = Array.from({ length: rows }, (_, r) => baseCount + (r < extra ? 1 : 0));
+
+    // 上の段は上側だけ見せて重ねる。数字はカード左上にあるのでこれで判別できる
+    const ROW_OVERLAP = 0.62;
+    // 段が増えるほどカードを小さくし、段を重ねても縦にはみ出さないようにする
+    const cardH = Math.min(88, availH / (1 + (rows - 1) * ROW_OVERLAP));
+    let cardW = Math.min(maxCardW, cardH / ratio);
+
+    // ---- 横幅合わせ（一番枚数の多い段に合わせて全段で同じサイズ・間隔にする）----
+    const widest = Math.max(...rowCounts);
+    const spread = Math.min(6, 44 / Math.max(widest, 1)); // 枚数が多いほど角度を詰める
+    // 端の札は回転しているぶん横幅を食う（62x88を20度傾けると実質89px）ので、
+    // 素の幅ではなく傾けた後の見かけ幅で場所を取る
+    const maxRot = ((widest - 1) / 2) * spread * Math.PI / 180;
     const widthFactor = Math.cos(maxRot) + ratio * Math.sin(maxRot);
 
-    let cardW = maxCardW;
-    let xstep = n > 1 ? Math.min(30, 300 / n) : 0;
-    const spanOf = (cw, xs) => (n - 1) * xs + cw * widthFactor;
-    if (spanOf(cardW, xstep) > usableW && n > 1) {
-      // まずは重なりを増やして詰める
-      xstep = Math.max(minXstep, (usableW - cardW * widthFactor) / (n - 1));
+    let xstep = widest > 1 ? Math.min(30, 300 / widest) : 0;
+    const spanOf = (cw, xs) => (widest - 1) * xs + cw * widthFactor;
+    if (spanOf(cardW, xstep) > usableW && widest > 1) {
+      xstep = Math.max(minXstep, (usableW - cardW * widthFactor) / (widest - 1));
       if (spanOf(cardW, xstep) > usableW) {
-        // それでも収まらなければカード自体を縮める
-        cardW = Math.max(minCardW, (usableW - (n - 1) * minXstep) / widthFactor);
-        xstep = Math.max(minXstep, (usableW - cardW * widthFactor) / (n - 1));
+        cardW = Math.max(minCardW, (usableW - (widest - 1) * minXstep) / widthFactor);
+        xstep = Math.max(minXstep, (usableW - cardW * widthFactor) / (widest - 1));
       }
     }
-    const cardH = Math.round(cardW * ratio);
-    const fontPx = Math.max(11, Math.round(14 * (cardW / maxCardW)));
+    const drawH = Math.round(cardW * ratio);
+    const rowStep = drawH * ROW_OVERLAP;
+    const fontPx = Math.max(10, Math.round(14 * (cardW / maxCardW)));
 
-    // タップ判定は「DOM上で一番上に重なっている札」ではなく「見た目の中心に一番近い札」で行う。
-    // 扇が詰まっている時（3人戦で18枚等）は、重なりの下になった札の実クリック領域が
-    // 十数pxしかなくなり、狙った札を押せなくなるため
+    // 今出せるカードを判定して、出せないものは薄く表示する。判定はエンジンの
+    // getPlayableCards(playGroupのドライラン方式)に任せ、ここでルールを再実装しない
+    const playable = new Set(getPlayableCards(state, state.turn));
+
     const toggleAt = (i) => {
       const card = hand[i];
       const at = selected.indexOf(card);
       if (at >= 0) selected.splice(at, 1); else selected.push(card);
       renderHand(hand); updateActions();
     };
+
+    // タップ判定は「DOM上で一番上に重なっている札」ではなく「見た目の中心に一番近い札」で行う。
+    // 札は横にも縦(段)にも重なっていて、下になった札の実クリック領域は十数pxしかないため
+    const layout = []; // {x, y}(コンテナ中央下端を原点とした各札の中心)
+    let idx = 0;
+    rowCounts.forEach((count, r) => {
+      const rowCenter = (count - 1) / 2;
+      // 弧で端の札が下にはみ出さないよう、段全体を弧の最大値ぶん持ち上げてから配置する
+      const arcOf = (off) => Math.pow(Math.abs(off), 1.2) * 4;
+      const maxArc = arcOf(rowCenter);
+      const rowBottom = (rows - 1 - r) * rowStep;
+
+      for (let j = 0; j < count; j++, idx++) {
+        const card = hand[idx];
+        const i = idx;
+        const off = j - rowCenter;
+        const x = off * xstep;
+        const arc = arcOf(off) - maxArc; // 端が0、中央が上に持ち上がる
+        layout.push({ x, y: rowBottom - arc + drawH / 2 });
+
+        const c = cardEl(card);
+        c.classList.add('hand-card');
+        if (!playable.has(card)) c.classList.add('unplayable');
+        c.tabIndex = 0;
+        c.style.width = cardW + 'px';
+        c.style.height = drawH + 'px';
+        c.style.fontSize = fontPx + 'px';
+        c.style.left = '50%';
+        c.style.bottom = rowBottom + 'px';
+        c.style.zIndex = r * 100 + j;
+        const rot = off * spread;
+        const base = `translateX(calc(-50% + ${x}px)) translateY(${arc}px) rotate(${rot}deg)`;
+        c.dataset.base = base;
+        c.style.transform = base;
+        if (selected.includes(card)) {
+          c.classList.add('selected');
+          c.style.transform = `translateX(calc(-50% + ${x}px)) translateY(${arc - 26}px) rotate(0deg)`;
+        }
+        // キーボード操作は実際にフォーカスしている札そのものを対象にする（重なりの影響を受けない）
+        c.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleAt(i); } });
+        el.appendChild(c);
+      }
+    });
+
     el.onclick = (e) => {
-      if (!hand.length) return;
       const rect = el.getBoundingClientRect();
-      const clickX = e.clientX - rect.left - rect.width / 2; // 扇の中心を0とした相対x
+      const px = e.clientX - rect.left - rect.width / 2; // 中央を0とした相対x
+      const py = rect.bottom - e.clientY;                // 下端を0とした相対y
       let best = 0, bestDist = Infinity;
-      hand.forEach((_, i) => {
-        const d = Math.abs(clickX - (i - center) * xstep);
+      layout.forEach((pt, i) => {
+        // 縦方向は段を跨いだ誤爆を防ぐため、横より重み付けを強くする
+        const d = Math.pow(px - pt.x, 2) + Math.pow((py - pt.y) * 1.6, 2);
         if (d < bestDist) { bestDist = d; best = i; }
       });
       toggleAt(best);
     };
-
-    // 今出せるカードを判定して、出せないものは薄く表示する。判定はエンジンの
-    // getPlayableCards(playGroupのドライラン方式)に任せ、ここでルールを再実装しない
-    const playable = new Set(getPlayableCards(state, state.turn));
-
-    hand.forEach((card, i) => {
-      const c = cardEl(card);
-      c.classList.add('hand-card');
-      if (!playable.has(card)) c.classList.add('unplayable');
-      c.tabIndex = 0;
-      c.style.width = cardW + 'px';
-      c.style.height = cardH + 'px';
-      c.style.fontSize = fontPx + 'px';
-      const off = i - center;
-      // 下端を軸に扇状：中央から外へ回転＋端ほど少し下がる弧
-      const rot = off * spread;
-      const arc = Math.pow(Math.abs(off), 1.2) * 4;
-      const x = off * xstep;
-      const base = `translateX(calc(-50% + ${x}px)) translateY(${arc}px) rotate(${rot}deg)`;
-      c.dataset.base = base;
-      c.style.left = '50%';
-      c.style.transform = base;
-      c.style.zIndex = i;
-      const isSel = selected.includes(card);
-      if (isSel){ c.classList.add('selected'); c.style.transform = `translateX(calc(-50% + ${x}px)) translateY(-26px) rotate(0deg)`; }
-      // キーボード操作は実際にフォーカスしている札そのものを対象にする（重なりの影響を受けない）
-      c.addEventListener('keydown', e => { if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggleAt(i); }});
-      el.appendChild(c);
-    });
   }
 
   function updateActions(){
