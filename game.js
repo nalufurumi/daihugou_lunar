@@ -28,6 +28,7 @@ export const DEFAULT_RULES = {
   twelve:     true,   // 12の数字宣言
   spade3:     true,   // スペードの3でジョーカーを返す
   sandstorm:  true,   // 砂嵐・ろくろ首(3を3枚)
+  straight:   true,   // 階段出し(同じスートの連番3枚以上)
   sequenceLock: true, // 階段縛り
   suitLock:   true,   // 記号(スート)縛り
 };
@@ -136,6 +137,10 @@ export function playGroup(state, playerIndex, cards, options = {}) {
     playType = options.playAs;
   } else {
     playType = getPlayType(cards);
+  }
+  // 階段出しをハウスルールでオフにしている場合は、階段としては出せない
+  if (playType === 'straight' && !ruleOn(state, 'straight')) {
+    throw new Error('このルールでは階段は出せません');
   }
   // 全部ジョーカーの組('group'型のみ。ジョーカーだけでは階段は成立しない)は、
   // 通常は代表rankが無く最強固定になるが、options.declareRankで「何のrankとして出すか」を

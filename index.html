@@ -119,6 +119,14 @@
   .count-pick{display:flex; gap:10px;}
   .count-pick button{width:52px; height:52px; border-radius:14px; border:1px solid var(--gold-line); background:rgba(255,255,255,.05); color:var(--text); font-family:var(--font-serif); font-size:24px; cursor:pointer;}
   .count-pick button.on{background:linear-gradient(160deg,var(--gold-hi),var(--gold-lo)); color:var(--gold-ink); border-color:transparent;}
+  /* デッキ選択は「1デッキ」のような文字なので、数字用の正方形ボタンだと溢れる。専用の横長ボタンにする */
+  .deck-pick{display:flex; gap:10px; justify-content:center;}
+  .deck-pick button{
+    min-width:100px; height:48px; padding:0 20px; border-radius:14px;
+    border:1px solid var(--gold-line); background:rgba(255,255,255,.05); color:var(--text);
+    font-family:var(--font-ui); font-weight:800; font-size:15px; cursor:pointer; white-space:nowrap;
+  }
+  .deck-pick button.on{background:linear-gradient(160deg,var(--gold-hi),var(--gold-lo)); color:var(--gold-ink); border-color:transparent;}
   .cta{background:linear-gradient(180deg,var(--gold-hi),var(--gold-lo)); color:var(--gold-ink); font-weight:800; font-size:17px; padding:16px 40px; border-radius:16px; border:none; cursor:pointer; box-shadow:0 16px 34px -12px rgba(220,178,79,.7);}
   .ghost-cta{background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12); color:var(--text); font-weight:700; font-size:14px; padding:13px 26px; border-radius:14px; cursor:pointer;}
 
@@ -176,13 +184,16 @@
   .rule-list{display:grid; grid-template-columns:1fr 1fr; gap:7px;}
   .rule-list[hidden]{display:none;} /* class側のdisplay:gridがhidden属性に勝つため明示的に消す */
   .rule-chip{
-    display:flex; align-items:center; gap:7px; background:rgba(255,255,255,.05);
-    border:1px solid var(--line); border-radius:11px; padding:8px 11px; cursor:pointer;
-    font-size:13px; font-weight:700; color:var(--text-faint);
+    display:flex; align-items:flex-start; gap:8px; background:rgba(255,255,255,.05);
+    border:1px solid var(--line); border-radius:11px; padding:9px 11px; cursor:pointer;
+    font-size:13px; font-weight:700; color:var(--text-faint); text-align:left;
     transition:border-color var(--dur) var(--ease), color var(--dur) var(--ease), background var(--dur) var(--ease);
   }
+  .rule-chip .body{display:flex; flex-direction:column; gap:1px; min-width:0;}
+  .rule-chip .desc{font-weight:500; font-size:11px; line-height:1.45; color:var(--text-faint);}
+  .rule-chip.on .desc{color:var(--text-mute);}
   .rule-chip .mark{
-    width:16px; height:16px; border-radius:5px; border:1px solid var(--gold-line);
+    width:16px; height:16px; margin-top:1px; border-radius:5px; border:1px solid var(--gold-line);
     flex:0 0 auto; display:flex; align-items:center; justify-content:center;
     font-size:11px; color:var(--gold-ink);
   }
@@ -275,7 +286,7 @@
       <div class="kicker">Lobby</div>
       <div class="lobby-block">
         <div class="lobby-label">デッキ数（2デッキなら人数を増やせます）</div>
-        <div class="count-pick" id="deckPick" style="justify-content:center;"></div>
+        <div class="deck-pick" id="deckPick"></div>
       </div>
       <div class="lobby-block">
         <div class="lobby-label">人数</div>
@@ -416,7 +427,7 @@
 
   // ---- ロビー（人数選択 → 名前入力 → 配る） ----
   // 1デッキ(54枚)は最大6人。2デッキ(108枚)なら手札枚数が確保できるので人数を広げる
-  const PLAYER_RANGE = { 1: [3,4,5,6], 2: [3,4,5,6,7,8,9,10] };
+  const PLAYER_RANGE = { 1: [2,3,4,5,6], 2: [2,3,4,5,6,7,8,9,10] };
 
   function buildDeckPick(){
     const wrap = $('deckPick'); wrap.innerHTML = '';
@@ -447,20 +458,33 @@
 
   // 表示名。ここに載せたものだけロビーで切り替えられる
   const RULE_LABELS = {
-    revolution:'革命', eightCut:'8切り', five:'5スキップ', seven:'7渡し',
-    nine:'9リバース', ten:'10捨て', eleven:'11バック', twelve:'12宣言',
-    spade3:'スペ3返し', sandstorm:'砂嵐', sequenceLock:'階段縛り', suitLock:'記号縛り',
+    revolution:  ['革命',        '同じ数字4枚以上で強さが逆転'],
+    eightCut:    ['8切り',       '8を出すと場が流れて自分の番が続く'],
+    five:        ['5スキップ',   '出した枚数だけ次の人を飛ばす'],
+    seven:       ['7渡し',       '出した枚数だけ次の人にカードを渡す'],
+    nine:        ['9リバース',   '手番の進む向きが逆になる'],
+    ten:         ['10捨て',      '出した枚数だけ手札を捨てられる'],
+    eleven:      ['11バック',    'スルー/バック/ステイを選べる'],
+    twelve:      ['12宣言',      '指定した数字を全員が捨てる'],
+    straight:    ['階段出し',    '同じマークの連番3枚以上を出せる'],
+    sequenceLock:['階段縛り',    '連番が続くと数字が縛られる'],
+    suitLock:    ['記号縛り',    '同じマークが続くとマークが縛られる'],
+    spade3:      ['スペ3返し',   'ジョーカー1枚にスペードの3で返せる'],
+    sandstorm:   ['砂嵐・ろくろ首','3を3枚出すと何にでも被せられる'],
   };
 
   function buildRuleList(){
     const list = $('ruleList'); list.innerHTML = '';
-    Object.entries(RULE_LABELS).forEach(([key, label]) => {
+    Object.entries(RULE_LABELS).forEach(([key, [label, desc]]) => {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'rule-chip' + (houseRules[key] ? ' on' : '');
       const mark = document.createElement('span'); mark.className = 'mark';
-      const txt = document.createElement('span'); txt.textContent = label;
-      chip.append(mark, txt);
+      const body = document.createElement('span'); body.className = 'body';
+      const name = document.createElement('span'); name.textContent = label;
+      const d = document.createElement('span'); d.className = 'desc'; d.textContent = desc;
+      body.append(name, d);
+      chip.append(mark, body);
       chip.onclick = () => { houseRules[key] = !houseRules[key]; buildRuleList(); };
       list.appendChild(chip);
     });
@@ -666,7 +690,8 @@
 
     // 組としても階段としても成立するカード（実カード1枚+ジョーカー2枚 等）は、
     // どちらの役で出すかをプレイヤーに選ばせる。1通りしかなければ今まで通り自動判定に任せる
-    const possibleTypes = getPossiblePlayTypes(cards);
+    // 階段出しをオフにしている場合は、役の選択肢からも階段を外す
+    const possibleTypes = getPossiblePlayTypes(cards).filter(t => t !== 'straight' || houseRules.straight);
     let playAs = null;
     if (possibleTypes.length > 1) {
       playAs = await askPlayAs(possibleTypes);
