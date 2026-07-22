@@ -94,9 +94,10 @@
     transition:transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), filter var(--dur) var(--ease);
   }
   .hand .card:focus-visible{outline:2px solid var(--gold-hi); outline-offset:2px;}
+  .hand .card.unplayable{filter:brightness(.55) saturate(.7);}
   .hand .card.selected{
     box-shadow:0 14px 28px -6px rgba(220,178,79,.6); outline:2px solid var(--gold);
-    z-index:60 !important;
+    z-index:60 !important; filter:none;
   }
 
   /* ===== アクションバー ===== */
@@ -163,6 +164,16 @@
   .rank-grid{display:flex; flex-wrap:wrap; gap:8px; justify-content:center; max-width:300px;}
   .rank-btn{width:40px; height:40px; border-radius:10px; border:1px solid var(--gold-line); background:rgba(255,255,255,.05); color:var(--text); font-family:var(--font-ui); font-weight:800; font-size:14px; cursor:pointer;}
   .rank-btn.on{background:linear-gradient(160deg,var(--gold-hi),var(--gold-lo)); color:var(--gold-ink); border-color:transparent;}
+
+  /* 階段の開始位置候補ボタン(5〜8 / 6〜9 等をまるごと1つの選択肢として出す) */
+  .straight-opt{
+    width:100%; text-align:left; background:rgba(255,255,255,.05); border:1px solid var(--line);
+    border-radius:12px; padding:12px 16px; color:var(--text); font-family:var(--font-ui);
+    font-weight:800; font-size:15px; cursor:pointer;
+    transition:border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+  }
+  .straight-opt:hover, .straight-opt:focus-visible{border-color:var(--gold-line); background:rgba(220,178,79,.08);}
+  .straight-opt .cards{display:block; font-weight:500; font-size:12.5px; color:var(--text-mute); margin-top:3px;}
 
   /* 結果リスト */
   .result-list{width:100%; max-width:300px; display:flex; flex-direction:column; gap:8px;}
@@ -238,6 +249,10 @@
     <div class="screen-inner">
       <div class="kicker">Lobby</div>
       <div class="lobby-block">
+        <div class="lobby-label">デッキ数（2デッキなら人数を増やせます）</div>
+        <div class="count-pick" id="deckPick" style="justify-content:center;"></div>
+      </div>
+      <div class="lobby-block">
         <div class="lobby-label">人数</div>
         <div class="count-pick" id="countPick" style="justify-content:center;"></div>
       </div>
@@ -282,6 +297,14 @@
     <button class="ghost-cta" id="playAsCancelBtn">やめる</button>
   </div>
 
+  <!-- 階段の開始位置選択（ジョーカーの分、複数の数字範囲で解釈できる時だけ表示） -->
+  <div class="overlay hidden" id="straightFromOverlay">
+    <div class="kicker">どの数字の階段として出す？</div>
+    <p>ジョーカーの分、複数の数字範囲で解釈できます。</p>
+    <div id="straightFromGrid" style="display:flex; flex-direction:column; gap:10px; width:100%; max-width:280px;"></div>
+    <button class="ghost-cta" id="straightFromCancelBtn">やめる</button>
+  </div>
+
   <!-- 手番受け渡しオーバーレイ（前の人の手札を隠す） -->
   <div class="overlay hidden" id="handoffOverlay">
     <div class="kicker">Pass &amp; Play</div>
@@ -304,8 +327,8 @@
 
 <script type="module">
   // 実エンジン（りゅうせい作）をそのまま利用。UI側は state を読んで描くだけ。
-  import { createDeck, shuffleDeck, dealCards, sortHand, getPossiblePlayTypes, getPlayType, getStraightRanks } from './card.js';
-  import { createGameState, playGroup, passTurn, isGameOver } from './game.js';
+  import { createDeck, shuffleDeck, dealCards, sortHand, getPossiblePlayTypes, getPlayType, getStraightRanks, getStraightStartCandidates } from './card.js';
+  import { createGameState, playGroup, passTurn, isGameOver, getPlayableCards } from './game.js';
 
   // ---- カード表示のためのヘルパ ----
   const SUIT_SYMBOL = { spade:'♠', heart:'♥', diamond:'♦', club:'♣' };
@@ -334,6 +357,7 @@
   // ---- 状態 ----
   let state = null;
   let playerCount = 4;
+  let deckCount = 1;            // 1 or 2。2デッキ(108枚)ならより多い人数で遊べる
   let selected = [];            // 選択中カードの参照配列
   let playerNames = [];         // ロビーで入力された名前（空文字なら既定名にフォールバック）
   const names = i => (playerNames[i] || '').trim() || `プレイヤー${i + 1}`;
@@ -361,9 +385,28 @@
   }
 
   // ---- ロビー（人数選択 → 名前入力 → 配る） ----
+  // 1デッキ(54枚)は最大6人。2デッキ(108枚)なら手札枚数が確保できるので人数を広げる
+  const PLAYER_RANGE = { 1: [3,4,5,6], 2: [3,4,5,6,7,8,9,10] };
+
+  function buildDeckPick(){
+    const wrap = $('deckPick'); wrap.innerHTML = '';
+    [1,2].forEach(n => {
+      const b = document.createElement('button');
+      b.textContent = n + 'デッキ';
+      if (n === deckCount) b.classList.add('on');
+      b.onclick = () => {
+        deckCount = n;
+        const range = PLAYER_RANGE[deckCount];
+        if (!range.includes(playerCount)) playerCount = range[range.length - 1];
+        buildDeckPick(); buildCountPick(); buildSeatList();
+      };
+      wrap.appendChild(b);
+    });
+  }
+
   function buildCountPick(){
     const wrap = $('countPick'); wrap.innerHTML = '';
-    [3,4,5,6].forEach(n => {
+    PLAYER_RANGE[deckCount].forEach(n => {
       const b = document.createElement('button');
       b.textContent = n;
       if (n === playerCount) b.classList.add('on');
@@ -395,7 +438,7 @@
     }
   }
   function deal(){
-    const deck = shuffleDeck(createDeck());
+    const deck = shuffleDeck(createDeck(deckCount));
     const hands = dealCards(deck, playerCount).map(h => sortHand(h)); // 配って各手札をソート
     state = createGameState(hands);
     selected = [];
@@ -491,9 +534,14 @@
       toggleAt(best);
     };
 
+    // 今出せるカードを判定して、出せないものは薄く表示する。判定はエンジンの
+    // getPlayableCards(playGroupのドライラン方式)に任せ、ここでルールを再実装しない
+    const playable = new Set(getPlayableCards(state, state.turn));
+
     hand.forEach((card, i) => {
       const c = cardEl(card);
       c.classList.add('hand-card');
+      if (!playable.has(card)) c.classList.add('unplayable');
       c.tabIndex = 0;
       c.style.width = cardW + 'px';
       c.style.height = cardH + 'px';
@@ -544,13 +592,26 @@
     const playType = playAs || getPlayType(cards);
     const options = playAs ? { playAs } : {};
 
+    // 階段がジョーカーの分だけ複数の数字範囲で解釈できる場合
+    // (例: 6,7,8,ジョーカー は「5〜8」でも「6〜9」でも成立する) は、
+    // どちらの範囲で出すかをプレイヤーに選ばせる。候補が1つなら自動判定に任せる
+    let straightFrom = null;
+    if (playType === 'straight') {
+      const startCandidates = getStraightStartCandidates(cards);
+      if (startCandidates.length > 1) {
+        straightFrom = await pickStraightFrom(cards, startCandidates);
+        if (!straightFrom) return; // 「やめる」
+        options.straightFrom = straightFrom;
+      }
+    }
+
     // 出した後に残る手札（7で渡す/10で捨てるカードの選択肢はここから選ぶ）
     let pool = state.hands[turnBefore].filter(c => !cards.includes(c));
     const repRank = (cards.find(c => c.suit !== 'joker') || {}).rank ?? null;
     // 階段はジョーカーで埋めている数字も含めて判定する（game.js側と同じ考え方）
     const containsRank = (rank) =>
       cards.some(c => c.rank === rank) ||
-      (playType === 'straight' && getStraightRanks(cards).includes(rank));
+      (playType === 'straight' && getStraightRanks(cards, straightFrom).includes(rank));
     // ペア系は出した枚数ぶん、階段はその数字を含んでいれば1
     const magnitude = (rank) => (playType === 'group' ? cards.length : (containsRank(rank) ? 1 : 0));
     const willTrigger = (rank) => (playType === 'group' ? repRank === rank : containsRank(rank));
@@ -613,6 +674,34 @@
       $('playAsGroupBtn').onclick = () => { cleanup(); resolve('group'); };
       $('playAsStraightBtn').onclick = () => { cleanup(); resolve('straight'); };
       $('playAsCancelBtn').onclick = () => { cleanup(); resolve(null); };
+    });
+  }
+
+  // 階段の開始rankを選ばせる（選んだrank or null(キャンセル) をPromiseで返す）
+  function pickStraightFrom(cards, startCandidates){
+    return new Promise((resolve) => {
+      const grid = $('straightFromGrid'); grid.innerHTML = '';
+      const cleanup = () => {
+        $('straightFromOverlay').classList.add('hidden');
+        $('straightFromCancelBtn').onclick = null;
+      };
+      startCandidates.forEach(startRank => {
+        const ranks = getStraightRanks(cards, startRank);
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'straight-opt';
+        // 数字はrankLabelを通した文字列なのでtextContent相当で組み立てる
+        const head = document.createElement('span');
+        head.textContent = `${rankLabel(ranks[0])} 〜 ${rankLabel(ranks[ranks.length - 1])} として出す`;
+        const sub = document.createElement('span');
+        sub.className = 'cards';
+        sub.textContent = ranks.map(rankLabel).join(', ');
+        b.append(head, sub);
+        b.onclick = () => { cleanup(); resolve(startRank); };
+        grid.appendChild(b);
+      });
+      $('straightFromOverlay').classList.remove('hidden');
+      $('straightFromCancelBtn').onclick = () => { cleanup(); resolve(null); };
     });
   }
 
@@ -705,7 +794,7 @@
   }
 
   // ---- オーバーレイ制御 ----
-  function hideAll(){ ['heroOverlay','lobbyOverlay','handoffOverlay','resultOverlay','playAsOverlay','pickCardsOverlay','pickRanksOverlay'].forEach(id => $(id).classList.add('hidden')); }
+  function hideAll(){ ['heroOverlay','lobbyOverlay','handoffOverlay','resultOverlay','playAsOverlay','straightFromOverlay','pickCardsOverlay','pickRanksOverlay'].forEach(id => $(id).classList.add('hidden')); }
   function showHandoff(){
     $('handoffName').textContent = names(state.turn);
     $('handoffOverlay').classList.remove('hidden');
@@ -750,7 +839,7 @@
   // ---- 画面遷移（ヒーロー → ロビー → ゲーム） ----
   function showLobby(){
     hideAll();
-    buildCountPick(); buildSeatList();
+    buildDeckPick(); buildCountPick(); buildSeatList();
     $('lobbyOverlay').classList.remove('hidden');
     $('lobbyOverlay').scrollTop = 0;
   }
@@ -774,6 +863,7 @@
 
   // 初期化
   buildHeroFan();
+  buildDeckPick();
   buildCountPick();
   buildSeatList();
 </script>
