@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>開発者ページ — DFG 大富豪</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --pine:#0b1f18; --pine-deep:#08170f; --felt:#1b4b3b; --felt-lit:#206b53;
+    --gold:#dcb24f; --gold-hi:#eec766; --gold-lo:#d3a13c; --gold-ink:#20130a;
+    --cream:#f6efdd; --ink:#1c2b25;
+    --text:#f3ecd8; --text-soft:#b9cabf; --text-mute:#8fa79b; --text-faint:#7f978b;
+    --line:rgba(255,255,255,.09); --gold-line:rgba(220,178,79,.3);
+    --font-serif:'Instrument Serif',serif;
+    --font-ui:'Manrope',-apple-system,'Hiragino Kaku Gothic ProN',sans-serif;
+    --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-6:24px; --sp-8:32px;
+    --dur:220ms; --ease:cubic-bezier(.2,.8,.2,1);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0; padding:0;}
+  body{
+    font-family:var(--font-ui); color:var(--text);
+    background:radial-gradient(120% 60% at 50% 0%, var(--felt-lit) 0%, #123a2d 38%, var(--pine) 100%);
+    min-height:100vh; line-height:1.75; -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--gold-hi);}
+  .wrap{max-width:760px; margin:0 auto; padding:var(--sp-6) var(--sp-4) 80px;}
+
+  /* ヘッダー */
+  header{padding:var(--sp-8) 0 var(--sp-6); text-align:center;}
+  .kicker{font-family:var(--font-ui); font-weight:800; font-size:12px; letter-spacing:.18em; color:var(--gold); text-transform:uppercase;}
+  h1{font-family:var(--font-serif); font-weight:400; font-size:40px; margin:8px 0 6px; line-height:1.1;}
+  h1 .jp{font-style:italic; color:var(--gold);}
+  .lead{color:var(--text-soft); font-size:15px; max-width:480px; margin:0 auto;}
+
+  /* 目次(ジャンプリンク) */
+  .jumpnav{display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin:var(--sp-6) 0;}
+  .jumpnav a{
+    background:rgba(255,255,255,.06); border:1px solid var(--line); border-radius:999px;
+    padding:8px 16px; font-size:13px; font-weight:700; text-decoration:none; color:var(--text-soft);
+    transition:border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  .jumpnav a:hover{border-color:var(--gold-line); color:var(--text);}
+
+  /* セクション共通 */
+  section{margin:var(--sp-8) 0; scroll-margin-top:20px;}
+  .card{
+    background:rgba(255,255,255,.045); border:1px solid var(--line); border-radius:18px;
+    padding:var(--sp-6); margin-bottom:var(--sp-4);
+  }
+  h2{font-family:var(--font-serif); font-weight:400; font-size:26px; margin:0 0 4px; color:var(--cream);}
+  h2 .no{color:var(--gold); font-style:italic; margin-right:6px;}
+  .sub{color:var(--text-mute); font-size:13px; margin:0 0 var(--sp-4);}
+
+  /* ステップ */
+  .steps{list-style:none; margin:0; padding:0; counter-reset:step;}
+  .steps > li{
+    counter-increment:step; position:relative; padding:14px 0 14px 44px; border-top:1px solid var(--line);
+  }
+  .steps > li:first-child{border-top:none;}
+  .steps > li::before{
+    content:counter(step); position:absolute; left:0; top:14px; width:28px; height:28px; border-radius:50%;
+    background:linear-gradient(160deg,var(--gold-hi),var(--gold-lo)); color:var(--gold-ink);
+    font-weight:800; font-size:13px; display:flex; align-items:center; justify-content:center;
+  }
+  .steps b{color:var(--cream);}
+  .steps code, .card code{
+    background:rgba(0,0,0,.28); border:1px solid var(--line); border-radius:6px;
+    padding:1px 7px; font-size:13px; color:var(--gold-hi); font-family:ui-monospace,monospace;
+  }
+  .steps .note{display:block; color:var(--text-mute); font-size:13px; margin-top:4px;}
+
+  /* PR一覧 */
+  #prList{display:flex; flex-direction:column; gap:8px;}
+  .pr-row{
+    display:flex; align-items:center; gap:10px; background:rgba(255,255,255,.05);
+    border:1px solid var(--line); border-radius:12px; padding:10px 14px; font-size:14px;
+  }
+  .pr-row .num{color:var(--gold); font-weight:800; font-family:ui-monospace,monospace; flex:0 0 auto;}
+  .pr-row .ttl{flex:1; min-width:0; color:var(--text);}
+  .pr-row .branch{color:var(--text-faint); font-size:12px; flex:0 0 auto;}
+  .status-line{color:var(--text-mute); font-size:13px; display:flex; align-items:center; gap:8px;}
+  .dot{width:8px; height:8px; border-radius:50%; background:var(--gold); flex:0 0 auto;}
+  .dot.err{background:#c0394a;}
+  .dot.loading{background:var(--text-faint); animation:pulse 1.2s infinite;}
+  @keyframes pulse{0%,100%{opacity:.3;}50%{opacity:1;}}
+
+  /* FAQ(開閉式) */
+  details{border-top:1px solid var(--line); padding:14px 0;}
+  details:first-of-type{border-top:none;}
+  summary{
+    cursor:pointer; font-weight:700; color:var(--cream); list-style:none; display:flex;
+    align-items:center; justify-content:space-between; gap:12px;
+  }
+  summary::-webkit-details-marker{display:none;}
+  summary::after{content:'+'; color:var(--gold); font-size:20px; font-weight:400; flex:0 0 auto;}
+  details[open] summary::after{content:'–';}
+  details p, details .warn{margin:10px 0 0; color:var(--text-soft); font-size:14.5px;}
+  .warn{
+    background:rgba(220,178,79,.09); border:1px solid var(--gold-line); border-radius:10px;
+    padding:12px 14px; margin-top:10px;
+  }
+
+  /* 担当・連絡 */
+  .who-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px;}
+  .who{background:rgba(255,255,255,.05); border:1px solid var(--line); border-radius:12px; padding:12px 14px;}
+  .who .name{font-weight:800; color:var(--cream); font-size:15px;}
+  .who .role{color:var(--text-mute); font-size:12.5px; margin-top:2px;}
+
+  footer{text-align:center; color:var(--text-faint); font-size:12px; padding-top:var(--sp-6);}
+  .cta{
+    display:inline-block; margin-top:var(--sp-3); background:linear-gradient(160deg,var(--gold-hi),var(--gold-lo));
+    color:var(--gold-ink); font-weight:800; padding:10px 20px; border-radius:999px; text-decoration:none; font-size:14px;
+  }
+
+  @media (max-width: 480px){
+    h1{font-size:30px;}
+    .wrap{padding:var(--sp-4) var(--sp-3) 60px;}
+    h2{font-size:22px;}
+    .card{padding:var(--sp-4);}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="kicker">Lunar · Internal</div>
+    <h1>開発者ページ <span class="jp">for みんな</span></h1>
+    <p class="lead">エンジニアじゃなくても大丈夫。迷ったらまずここを見れば、だいたい解決します。</p>
+    <nav class="jumpnav">
+      <a href="#status">今の状況</a>
+      <a href="#howto">変更の送り方</a>
+      <a href="#faq">詰まりポイント</a>
+      <a href="#who">誰に聞く</a>
+    </nav>
+  </header>
+
+  <section id="status">
+    <h2><span class="no">01</span>今の状況</h2>
+    <p class="sub">今このリポジトリで開いている作業(Pull Request)の一覧。ページを開くたびに最新を取りに行きます。</p>
+    <div class="card">
+      <div id="prStatusLine" class="status-line"><span class="dot loading"></span>読み込み中…</div>
+      <div id="prList" style="margin-top:10px;"></div>
+    </div>
+  </section>
+
+  <section id="howto">
+    <h2><span class="no">02</span>変更をチームに送るまで</h2>
+    <p class="sub">GitHub Desktopだけで完結します。ターミナルもコマンドも使いません。</p>
+    <div class="card">
+      <ol class="steps">
+        <li><b>まず最新を取り込む</b> — 作業を始める前に、GitHub Desktop左上の <code>Fetch origin</code> → <code>Pull origin</code> を押す。
+          <span class="note">これをサボると、自分の変更と誰かの変更がぶつかる(コンフリクト)原因になります。作業を始める前に必ず1回。</span>
+        </li>
+        <li><b>自分の作業ブランチを作る／切り替える</b> — 左上の <code>Current Branch</code> から
+          <code>New Branch</code>。名前は <code>feature/やること名</code> のように。
+          <span class="note"><code>main</code>ブランチのままでは絶対に作業しない（後述のFAQ参照）。</span>
+        </li>
+        <li><b>ファイルを直す</b> — Claudeやエディタでコードを書く／直す。</li>
+        <li><b>保存する(コミット)</b> — GitHub Desktop左下に、変更した内容とメッセージ欄が出るので、
+          「何をしたか」を日本語で一言書いて <code>Commit to feature/〜</code> を押す。
+          <span class="note">例: 「カードの選択画面を直した」「人数選択を6人までにした」</span>
+        </li>
+        <li><b>チームに送る(プッシュ)</b> — 上の <code>Push origin</code> を押す。これで自分のPCの変更がGitHubに届く。</li>
+        <li><b>Pull Requestを作る</b> — GitHub Desktopに出てくる <code>Create Pull Request</code> を押すとブラウザが開くので、
+          何をしたか簡単に書いて作成。
+          <span class="note">「できました」を口頭やDiscordで言うだけで終わらせず、必ずPRを作ってください。これが無いと、あなたの変更は本番に反映されません。</span>
+        </li>
+      </ol>
+      <a class="cta" href="./CONTRIBUTING.md">もっと詳しいルールを見る →</a>
+    </div>
+  </section>
+
+  <section id="faq">
+    <h2><span class="no">03</span>よくある詰まりポイント</h2>
+    <p class="sub">タップすると開きます。</p>
+    <div class="card">
+      <details open>
+        <summary>「大富豪　第◯弾」ってフォルダ、あれ何？触っていい？</summary>
+        <div class="warn">
+          ⚠️ <b>触らないでください（過去に3回、これが原因で機能が反映されない事故が起きています）。</b><br>
+          「大富豪　第七弾」「大富豪　第九弾」のような番号付きフォルダは、<b>過去の記録用（アーカイブ）</b>で、
+          ゲームの動作には一切使われていません。<br><br>
+          実際にゲームが読み込んでいるのは、リポジトリの一番上の階層にある
+          <code>card.js</code> と <code>game.js</code> の2つだけです。
+          ロジックを直したい時は、必ずこの2つを直接編集してください。
+        </div>
+      </details>
+      <details>
+        <summary>どのファイルを触ればいいか分からない</summary>
+        <p>基本的にこの3つだけで、ほぼ全部作れます。</p>
+        <p>
+          <code>index.html</code> … 画面・見た目・ボタンの動き(UI)全部<br>
+          <code>card.js</code> … カード1枚1枚の強さ・役の判定<br>
+          <code>game.js</code> … ゲーム全体の進み方(誰の番か、場に何が出てるか)
+        </p>
+      </details>
+      <details>
+        <summary><code>main</code>ブランチを直接触っちゃダメなの？</summary>
+        <p>
+          はい、ダメです。<code>main</code>は「今動いている本番」そのものなので、
+          直接壊れた変更が入ると全員が困ります。必ず自分の<code>feature/〜</code>ブランチで作業して、
+          Pull Requestを経由してから<code>main</code>に入るようにしてください。
+        </p>
+      </details>
+      <details>
+        <summary>Pushしようとしたらエラーが出た／コンフリクトと言われた</summary>
+        <p>
+          自分の変更と、他の人が先に送った変更が同じ場所を直していると起きます。
+          無理に一人で解決しようとせず、<b>そのままの状態でDiscordに相談</b>してください。
+          スクリーンショットがあると早く解決します。
+        </p>
+      </details>
+      <details>
+        <summary>自分の変更がサイトに反映されない</summary>
+        <p>
+          Pull Requestを作っただけではまだ本番に反映されません。誰かが<b>マージ</b>（<code>main</code>への取り込み）
+          するまで待つ必要があります。マージされたら数分でVercelが自動で公開してくれます。
+        </p>
+      </details>
+    </div>
+  </section>
+
+  <section id="who">
+    <h2><span class="no">04</span>誰に聞く？</h2>
+    <p class="sub">分からないことは一人で抱えず、すぐ聞いてください。「遊び心を忘れない」精神です。</p>
+    <div class="card">
+      <div class="who-grid">
+        <div class="who"><div class="name">なる</div><div class="role">全体・エンジン周り</div></div>
+        <div class="who"><div class="name">りゅうせい</div><div class="role">ゲームロジック</div></div>
+      </div>
+      <p style="margin-top:14px;">上記以外の担当は、実際の分担に合わせてこのページを直接編集してください（<code>dev.html</code>内の<code>#who</code>セクション）。</p>
+    </div>
+  </section>
+
+  <footer>
+    DFG 大富豪 · 開発者ページ · このページ自体もPRで直せます
+  </footer>
+</div>
+
+<script>
+  // 今開いているPull Requestの一覧を取りに行く（公開リポジトリなので認証不要）。
+  // 取得に失敗しても壊れて見えないよう、必ずGitHubへの直リンクにフォールバックする
+  (async () => {
+    const line = document.getElementById('prStatusLine');
+    const list = document.getElementById('prList');
+    const REPO = 'nalufurumi/daihugou_lunar';
+
+    try {
+      const res = await fetch(`https://api.github.com/repos/${REPO}/pulls?state=open`, {
+        headers: { Accept: 'application/vnd.github+json' },
+      });
+      if (!res.ok) throw new Error('status ' + res.status);
+      const prs = await res.json();
+
+      if (prs.length === 0) {
+        line.innerHTML = '<span class="dot"></span>今、開いている作業はありません（みんな平和です）';
+        return;
+      }
+      line.innerHTML = `<span class="dot"></span>今 ${prs.length} 件、レビュー待ちの作業があります`;
+      list.innerHTML = '';
+      prs.forEach(pr => {
+        const row = document.createElement('a');
+        row.href = pr.html_url;
+        row.target = '_blank';
+        row.rel = 'noopener';
+        row.style.textDecoration = 'none';
+        row.className = 'pr-row';
+        // 値は全部textContent相当のDOM組み立てにして、タイトルにHTMLが混ざっても安全に表示する
+        const num = document.createElement('span'); num.className = 'num'; num.textContent = '#' + pr.number;
+        const ttl = document.createElement('span'); ttl.className = 'ttl'; ttl.textContent = pr.title;
+        const br  = document.createElement('span'); br.className  = 'branch'; br.textContent = pr.head.ref;
+        row.append(num, ttl, br);
+        list.appendChild(row);
+      });
+    } catch (e) {
+      line.innerHTML = `<span class="dot err"></span>一覧を取得できませんでした。<a href="https://github.com/${REPO}/pulls" target="_blank" rel="noopener">GitHubで直接見る →</a>`;
+    }
+  })();
+</script>
+</body>
+</html>
